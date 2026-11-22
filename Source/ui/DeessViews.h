@@ -307,10 +307,8 @@ public:
         // le compte des 6 dernières secondes
         juce::String sum;
         for (int t = 0; t < 4; ++t) sum << targetName (t) << " " << counts[t] << (t < 3 ? "   " : "");
-        text (g, fr ("RETIRÉ · ") + sum, R (r.getX() + 16 * u, r.getBottom() - 22 * u, 300 * u, 16 * u), font (Face::mono, 9.0f * u), haze,
+        text (g, fr ("CE QUI EST RETIRÉ, SON PAR SON  ·  ") + sum, R (r.getX() + 16 * u, r.getBottom() - 22 * u, 520 * u, 16 * u), font (Face::mono, 9.0f * u), haze,
               juce::Justification::centredLeft);
-        text (g, fr ("CE QUI EST RETIRÉ, SON PAR SON"), R (r.getX() + 16 * u, r.getY() + 6 * u, 300 * u, 14 * u), font (Face::display, 8.5f * u, 0.16f),
-              haze.withAlpha (0.7f), juce::Justification::centredLeft);
     }
 
     void mouseMove (const juce::MouseEvent& e) override
