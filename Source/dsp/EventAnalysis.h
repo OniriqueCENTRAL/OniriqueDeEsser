@@ -261,6 +261,14 @@ public:
         }
     }
 
+    // T ou K : le T est un claquement diffus qui monte jusque dans l'extrême aigu ; le K (et le G sourd) est compact, son énergie
+    // tient entre 2,5 et 9 kHz et retombe au-dessus (réglé sur des exemples nommés : K -13 dB au-dessus de 9 kHz, T à plat).
+    static juce::String burstLetter (double sE, double airE)
+    {
+        const double fall = 10.0 * std::log10 (sE / 4500.0 + 1e-20) - 10.0 * std::log10 (airE / 7000.0 + 1e-20);
+        return fall > 7.0 ? "K" : "T";
+    }
+
     void findConsonants (std::vector<Event>& out) const
     {
         const int nF = (int) frames.size(), look = ms (15), burstMax = ms (70);
@@ -289,12 +297,13 @@ public:
                 }
                 if (e - f >= ms (5))
                 {
-                    double pop = 0, body = 0, hi = 0, vo = 0;
+                    double pop = 0, body = 0, hi = 0, vo = 0, sE = 0, airE = 0;
                     for (int k = f; k < e; ++k)
                     {
                         const auto& q = frames[(size_t) k];
                         pop += std::pow (10.0, q.pop * 0.1); body += std::pow (10.0, q.body * 0.1);
                         hi += std::pow (10.0, q.ch * 0.1) + std::pow (10.0, q.s * 0.1) + std::pow (10.0, q.air * 0.1);
+                        sE += std::pow (10.0, q.s * 0.1); airE += std::pow (10.0, q.air * 0.1);
                         vo += q.voicing;
                     }
                     vo /= (e - f);
@@ -308,7 +317,7 @@ public:
                     // P, B : le coup de grave doit dominer le corps de la voix (8 dB) ; une note chantée qui démarre fait aussi
                     // monter le grave (son fondamental), mais avec ses harmoniques : ce n'est pas une plosive
                     if (popJump && pop > 6.3 * body && pop > hi) { letter = vo0 > 0.6f ? "B" : "P"; band = 10.0f * std::log10 ((float) (pop / (e - f)) + 1.0e-13f) + 6.0f; }
-                    else if (vo0 < 0.5f && hi > 0.35 * (pop + body + hi)) letter = "T";
+                    else if (vo0 < 0.5f && hi > 0.35 * (pop + body + hi)) letter = burstLetter (sE, airE);
                     else if (vo0 < 0.45f && ! popJump && hi > 0.12 * (pop + body + hi)) letter = "K";
                     if (letter.isNotEmpty())
                     {
@@ -353,7 +362,9 @@ public:
                 }
                 if (e - f >= ms (5) && e - f <= longest && ! taken (toSample (f), toSample (e)))
                 {
-                    out.push_back (make (f, e, consonant, "T", pk, 3.0f));
+                    double sE = 0, airE = 0;
+                    for (int k = f; k < e; ++k) { sE += std::pow (10.0, frames[(size_t) k].s * 0.1); airE += std::pow (10.0, frames[(size_t) k].air * 0.1); }
+                    out.push_back (make (f, e, consonant, burstLetter (sE, airE), pk, 3.0f));
                     f = e + ms (30);
                     continue;
                 }
