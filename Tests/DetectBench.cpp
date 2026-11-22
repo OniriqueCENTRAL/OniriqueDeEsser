@@ -33,7 +33,8 @@ int main (int argc, char** argv)
     std::cout << "\n";
     for (auto& e : ev)
         std::cout << juce::String (e.start / fs, 3) << "-" << juce::String (e.end / fs, 3) << "  " << e.letter << "  niv " << juce::String (e.levelDb, 1)
-                  << "  saillie " << juce::String (e.saliencyDb, 1) << "\n";
+                  << "  saillie " << juce::String (e.saliencyDb, 1)
+                  << (e.family == 0 ? "  montee " + juce::String (e.rise, 1) + "  chute " + juce::String (e.fall, 1) : juce::String()) << "\n";
 
     if (auto* dbg = std::getenv ("DEBUG_T"))
     {
@@ -44,7 +45,7 @@ int main (int argc, char** argv)
         for (int f = 0; f < (int) a.frames.size(); ++f)
         {
             const double tf = (double) a.toSample (f) / fs;
-            if (std::abs (tf - t) > 0.08 || (f % 2)) continue;
+            if (std::abs (tf - t) > (std::getenv ("DEBUG_W") ? atof (std::getenv ("DEBUG_W")) : 0.08) || (f % 2)) continue;
             const auto& r = a.frames[(size_t) f];
             std::cout << juce::String (tf, 3) << " tot " << juce::String (r.total, 1) << " pop " << juce::String (r.pop, 1) << " body " << juce::String (r.body, 1)
                       << " low " << juce::String (r.low, 1) << " ch " << juce::String (r.ch, 1) << " s " << juce::String (r.s, 1) << " air " << juce::String (r.air, 1)

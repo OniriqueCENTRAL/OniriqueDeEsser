@@ -110,7 +110,42 @@ struct Column
 {
     float inDb = -120.0f, outDb = -120.0f, detDb = -120.0f, redDb = 0.0f;
     int who = -1;    // le son le plus baissé dans la colonne (Target), -1 : rien
+    float eCh = 0.0f, eS = 0.0f, eAir = 0.0f, eAll = 0.0f;   // densités (puissance par Hz) 2,5-4,5 / 4,5-9 / 9-16 kHz : la forme du son (affichage)
 };
+
+/** La lettre d'un retrait (des colonnes à la suite) : T si c'est surtout le détecteur T qui a baissé, sinon la forme du
+    souffle (hissShape) dit S, CH ou F, quel que soit le détecteur qui a agi. Seul compte le cœur du retrait (les colonnes
+    les plus baissées et les plus riches en aigu), pas la queue du relâchement ni la voyelle d'après. Affichage seulement. */
+inline int soundOf (const Column* c, int n, float* riseOut = nullptr, float* fallOut = nullptr, int* coreOut = nullptr) noexcept
+{
+    if (n <= 0) return tS;
+    int tCols = 0;
+    float maxRed = 0.0f; double maxHf = 0.0;
+    auto hf = [] (const Column& k) { return (double) k.eCh * 2000.0 + (double) k.eS * 4500.0 + (double) k.eAir * 7000.0; };
+    for (int i = 0; i < n; ++i) { tCols += c[i].who == tT ? 1 : 0; maxRed = std::max (maxRed, c[i].redDb); maxHf = std::max (maxHf, hf (c[i])); }
+    if (tCols * 2 > n) return tT;
+    double e[3] {}, all = 0.0, hot = 0.0;
+    int core = 0, whoCount[numTargets] {};
+    for (int i = 0; i < n; ++i)
+    {
+        if (c[i].who >= 0) whoCount[c[i].who]++;
+        if (c[i].redDb >= 0.5f * maxRed && hf (c[i]) >= 0.25 * maxHf)
+        { e[0] += c[i].eCh; e[1] += c[i].eS; e[2] += c[i].eAir; all += c[i].eAll; hot += hf (c[i]); ++core; }
+    }
+    auto d = [] (double v) { return 10.0 * std::log10 (v + 1.0e-30); };
+    if (riseOut != nullptr) *riseOut = (float) (std::max (d (e[1]), d (e[2])) - d (e[0]));
+    if (fallOut != nullptr) *fallOut = (float) (d (e[1]) - d (e[2]));
+    if (coreOut != nullptr) *coreOut = core;
+    // pas un souffle (une voyelle brillante baissée) : la lettre du détecteur qui a agi, comme avant
+    if (hot < 0.35 * all)
+    {
+        int best = tS;
+        for (int t = 0; t < numTargets; ++t) if (whoCount[t] > whoCount[best]) best = t;
+        return best;
+    }
+    const int k = hissShape (d (e[0]), d (e[1]), d (e[2]));
+    return k == 1 ? tCH : (k == 2 ? tF : tS);
+}
 
 class AutoDeEsser
 {
@@ -128,6 +163,17 @@ public:
         shelfDb = 0.0f; duckS = 1.0f; shelf.reset();
         listenS.reset (fs, 0.03);
         colCount = 0; colIn = colOut = colDet = colRed = 0.0f; for (auto& w : colWho) w = 0.0f;
+        // la forme du son, pour la lettre affichée : trois bandes raides (passe-haut et passe-bas doublés, 24 dB/oct)
+        const double top = std::min (16000.0, 0.45 * fs);
+        const double edges[3][2] { { 2500.0, 4500.0 }, { 4500.0, 9000.0 }, { 9000.0, top } };
+        for (int k = 0; k < 3; ++k)
+        {
+            shape[k][0].setCoeffs (BiquadCoeffs::highpass (fs, edges[k][0], 0.7071)); shape[k][1].setCoeffs (BiquadCoeffs::highpass (fs, edges[k][0], 0.7071));
+            shape[k][2].setCoeffs (BiquadCoeffs::lowpass (fs, edges[k][1], 0.7071));  shape[k][3].setCoeffs (BiquadCoeffs::lowpass (fs, edges[k][1], 0.7071));
+            for (auto& b : shape[k]) b.reset();
+        }
+        shapeW[0] = 2000.0; shapeW[1] = 4500.0; shapeW[2] = std::max (1000.0, top - 9000.0);
+        for (auto& e : colE) e = 0.0;
     }
     int latency() const noexcept { return look * numTargets; }
 
@@ -144,8 +190,16 @@ public:
         float x[2], red[numTargets];
         for (int i = 0; i < n; ++i)
         {
-            float in = 0.0f;
-            for (int c = 0; c < numCh; ++c) { x[c] = ch[c][i]; in = std::max (in, std::abs (x[c])); }
+            float in = 0.0f, mid = 0.0f;
+            for (int c = 0; c < numCh; ++c) { x[c] = ch[c][i]; in = std::max (in, std::abs (x[c])); mid += x[c]; }
+            mid /= (float) numCh;
+            colE[3] += (double) mid * mid;
+            for (int k = 0; k < 3; ++k)
+            {
+                float v = mid;
+                for (auto& b : shape[k]) v = b.process (v, 0);
+                colE[k] += (double) v * v;
+            }
             float det = -140.0f, worst = 0.0f;
             int who = -1;
             for (int t = 0; t < numTargets; ++t)
@@ -192,6 +246,8 @@ private:
         Column c;
         auto db = [] (float a) { return 20.0f * std::log10 (a + 1.0e-7f); };
         c.inDb = db (colIn); c.outDb = db (colOut); c.detDb = colDet; c.redDb = colRed;
+        c.eCh = (float) (colE[0] / shapeW[0]); c.eS = (float) (colE[1] / shapeW[1]); c.eAir = (float) (colE[2] / shapeW[2]); c.eAll = (float) colE[3];
+        for (auto& e : colE) e = 0.0;
         float best = 0.3f;   // moins de 0,3 dB : rien de retiré
         for (int t = 0; t < numTargets; ++t) if (colWho[t] / (float) colLen > best) { best = colWho[t] / (float) colLen; c.who = t; }
         const int w = written.load (std::memory_order_relaxed);
@@ -210,6 +266,8 @@ private:
     float shelfDb = 0.0f, duckS = 1.0f;
     juce::SmoothedValue<float> clar, listenS;
     float colIn = 0, colOut = 0, colDet = -140, colRed = 0, colWho[numTargets] {};
+    Biquad shape[3][4];
+    double colE[4] {}, shapeW[3] { 2000.0, 4500.0, 7000.0 };
     std::array<Column, historySize> ring {};
     std::atomic<int> written { 0 };
     std::atomic<float> meter { 0.0f };

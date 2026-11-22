@@ -254,8 +254,20 @@ public:
             if (c.detDb > -100.0f) { if (! det) { detP.startNewSubPath (x, y (c.detDb)); det = true; } else detP.lineTo (x + dx * 0.5f, y (c.detDb)); }
             if (c.who >= 0)
             {
-                if (! groups.empty() && groups.back().b == i && groups.back().who == c.who) { groups.back().b = i + 1; groups.back().red = std::max (groups.back().red, c.redDb); }
+                if (! groups.empty() && groups.back().b == i) { groups.back().b = i + 1; groups.back().red = std::max (groups.back().red, c.redDb); }
                 else groups.push_back ({ i, i + 1, c.who, c.redDb });
+            }
+        }
+        // la lettre de chaque retrait : le son qui a été baissé (sa forme), pas seulement le détecteur qui a agi
+        std::vector<int> colWho ((size_t) N, -1);
+        {
+            std::vector<onirique::deess::Column> cols;
+            for (auto& gr : groups)
+            {
+                cols.clear();
+                for (int i = gr.a; i < gr.b; ++i) cols.push_back (eng.column (w - N + i));
+                gr.who = onirique::deess::soundOf (cols.data(), (int) cols.size());
+                for (int i = gr.a; i < gr.b; ++i) colWho[(size_t) i] = gr.who;
             }
         }
         inP.lineTo (plot.getRight(), plot.getBottom()); inP.closeSubPath();
@@ -273,7 +285,7 @@ public:
             const auto c = eng.column (idx);
             if (c.who < 0 || c.redDb < 0.3f) continue;
             const float x = plot.getX() + dx * (float) i, top = y (c.inDb), h = std::max (2.0f * u, plot.getHeight() * c.redDb / 72.0f * 2.2f);
-            g.setColour (targetColour (c.who).withAlpha (0.85f));
+            g.setColour (targetColour (colWho[(size_t) i] >= 0 ? colWho[(size_t) i] : c.who).withAlpha (0.85f));
             g.fillRect (R (x, top, dx + 0.6f, h));
         }
         // le niveau détecté (ce que regarde le THRESHOLD)

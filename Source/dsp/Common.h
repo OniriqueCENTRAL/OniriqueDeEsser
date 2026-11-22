@@ -67,4 +67,16 @@ private:
     std::vector<float> buf;
     int len = 0, idx = 0;
 };
+// La forme d'un souffle aigu : S, CH ou F. Réglé sur des exemples nommés (S, CH, F, T d'une vraie voix) :
+//   CH : plat de 2,5 à 9 kHz puis il retombe (rien ne monte vers l'aigu) ;
+//   S  : monte fort vers l'aigu (+10 dB et plus entre 2,5-4,5 kHz et le haut) ;
+//   F  : monte moins que le S, diffus, et retombe un peu au-dessus de 9 kHz.
+// Les entrées sont des densités (dB par Hz) : 2,5-4,5 kHz, 4,5-9 kHz, 9-16 kHz. Renvoie 0 S, 1 CH, 2 F.
+inline int hissShape (double chD, double sD, double aD) noexcept
+{
+    const double rise = std::max (sD, aD) - chD, fall = sD - aD;
+    if (rise < 2.0 && fall > 3.0) return 1;
+    if (rise >= 4.0 && rise < 10.0 && fall >= 1.5 && fall <= 6.0) return 2;
+    return 0;
+}
 } // namespace onirique

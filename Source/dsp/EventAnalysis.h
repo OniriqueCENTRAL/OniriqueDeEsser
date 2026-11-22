@@ -5,6 +5,7 @@
 #include <deque>
 #include <algorithm>
 #include <cmath>
+#include "Common.h"
 
 namespace onirique::deess
 {
@@ -34,6 +35,7 @@ struct Event
     float gainDb = 0.0f;                // le réglage (0 : inchangé)
     bool manual = false;                // réglé à la main : TOUT RÉDUIRE ne le touche plus
     bool muted = false;                 // ignoré (gain non appliqué)
+    float rise = 0.0f, fall = 0.0f;     // forme du souffle (bancs de mesure) : montée des aigus, chute au-dessus de 9 kHz
 };
 
 class Analyzer
@@ -52,6 +54,18 @@ public:
         a.findConsonants (out);
         a.findHighBursts (out);
         a.findBreaths (out);
+        // l'attaque d'un S ou d'un F n'est pas une consonne : un T, K, P ou B posé sur un souffle aigu est retiré
+        {
+            std::vector<Event> sib;
+            for (const auto& e : out) if (e.family == sibilance) sib.push_back (e);
+            const juce::int64 pre = (juce::int64) (fs * 0.012);
+            out.erase (std::remove_if (out.begin(), out.end(), [&] (const Event& e)
+            {
+                if (e.family != consonant) return false;
+                for (const auto& q : sib) if (e.end > q.start - pre && e.start < q.end) return true;
+                return false;
+            }), out.end());
+        }
         for (auto& e : out) { e.start += offset; e.end += offset; }
         std::sort (out.begin(), out.end(), [] (const Event& p, const Event& q) { return p.start < q.start; });
         return out;
@@ -233,11 +247,17 @@ public:
                 bandPk = std::max (bandPk, hf (f));
             }
             vo /= (b - a);
+            // densités (dB par Hz) : 2,5-4,5 kHz, 4,5-9 kHz, 9-16 kHz
+            const double chD = 10.0 * std::log10 (ch / 2000.0 + 1e-20), sD = 10.0 * std::log10 (s / 4500.0 + 1e-20),
+                         aD = 10.0 * std::log10 (air / 7000.0 + 1e-20);
+            const float rise = (float) (std::max (sD, aD) - chD), fall = (float) (sD - aD);
             juce::String letter = "S";
-            if (ch > 1.6 * (s + air)) letter = "CH";
-            else if (air > 1.3 * s && bandPk < frames[(size_t) a].voiceRef - 14.0f) letter = "F";
-            else if (vo > 0.6 && body > 0.25 * (ch + s + air)) letter = "Z";
+            const int shape = hissShape (chD, sD, aD);
+            if (ch > 1.6 * (s + air) || shape == 1) letter = "CH";
+            else if (vo > 0.6 && body > 0.25 * (ch + s + air)) letter = "Z";   // un souffle chanté : Z (avant F, qui est sourd)
+            else if (shape == 2 || (air > 1.3 * s && bandPk < frames[(size_t) a].voiceRef - 14.0f)) letter = "F";
             out.push_back (make (a, b, sibilance, letter, bandPk, 6.0f));
+            out.back().rise = rise; out.back().fall = fall;
         }
     }
 
