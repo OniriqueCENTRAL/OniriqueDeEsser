@@ -35,10 +35,11 @@ inline juce::Colour targetColour (int t)
         case 0:  return ui::accent;                      // S
         case 1:  return juce::Colour (0xffffb35c);       // T
         case 2:  return juce::Colour (0xffff8fbf);       // CH
+        case 4:  return juce::Colour (0xffe7d27a);       // K
         default: return juce::Colour (0xff9fc3e6);       // F
     }
 }
-inline const char* targetName (int t) { static const char* n[] { "S", "T", "CH", "F" }; return n[juce::jlimit (0, 3, t)]; }
+inline const char* targetName (int t) { static const char* n[] { "S", "T", "CH", "F", "K" }; return n[juce::jlimit (0, 4, t)]; }
 inline juce::String familyName (int f) { return f == 0 ? fr ("SIBILANCES") : f == 1 ? fr ("CONSONNES") : fr ("RESPIRATIONS"); }
 
 inline juce::String timeText (double seconds)
@@ -88,6 +89,46 @@ private:
     juce::String label;
     bool lit = false, hasDot = false;
     juce::Colour dot;
+    float u = 1.0f;
+};
+
+//==============================================================================
+/** LIVE (mode AUTO) : une case à cocher, liée à son paramètre. Cochée : latence courte, pour enregistrer à travers. */
+class LiveCheck : public juce::Button
+{
+public:
+    explicit LiveCheck (juce::RangedAudioParameter& p) : juce::Button ("LIVE"), attachment (p, *this)
+    {
+        setClickingTogglesState (true);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    }
+    void setScale (float s) { u = s; repaint(); }
+    void paintButton (juce::Graphics& g, bool over, bool) override
+    {
+        using namespace ui;
+        const auto r = getLocalBounds().toFloat();
+        const bool on = getToggleState();
+        const float b = 16.0f * u;
+        const auto box = R (b, b).withCentre ({ r.getX() + 2.0f * u + b * 0.5f, r.getCentreY() });
+        g.setColour (on ? accent : juce::Colour (0xff120c0e).withAlpha (0.85f));
+        g.fillRoundedRectangle (box, 4.0f * u);
+        g.setColour (on ? accent.brighter (0.3f) : bone.withAlpha (over ? 0.55f : 0.3f));
+        g.drawRoundedRectangle (box.reduced (0.5f), 4.0f * u, 1.2f * u);
+        if (on)
+        {
+            juce::Path tick;
+            tick.startNewSubPath (box.getX() + b * 0.25f, box.getCentreY());
+            tick.lineTo (box.getX() + b * 0.43f, box.getBottom() - b * 0.28f);
+            tick.lineTo (box.getRight() - b * 0.22f, box.getY() + b * 0.27f);
+            g.setColour (bone);
+            g.strokePath (tick, juce::PathStrokeType (2.0f * u, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        const auto tr = r.withTrimmedLeft (b + 10.0f * u);
+        ui::text (g, "LIVE", tr.withWidth (40.0f * u), font (Face::body, 10.5f * u, 0.14f), bone.withAlpha (on || over ? 1.0f : 0.7f), juce::Justification::centredLeft);
+        ui::text (g, on ? fr ("latence 3 ms") : fr ("mix : tri précis"), tr.withTrimmedLeft (44.0f * u), font (Face::mono, 8.5f * u), haze, juce::Justification::centredLeft);
+    }
+private:
+    juce::ButtonParameterAttachment attachment;
     float u = 1.0f;
 };
 
@@ -210,6 +251,13 @@ public:
     }
     void setScale (float s) { u = s; repaint(); }
 
+    bool enabled (int t) const
+    {
+        static const juce::String ids[] { params::targetS, params::targetT, params::targetCH, params::targetF, params::targetK };
+        auto* v = proc.apvts.getRawParameterValue (ids[juce::jlimit (0, 4, t)]);
+        return v != nullptr && v->load() > 0.5f;
+    }
+
     void tick()
     {
         const int w = proc.autoEngine().writeIndex();
@@ -242,7 +290,7 @@ public:
         outP.startNewSubPath (plot.getX(), plot.getBottom());
         struct Group { int a, b, who; float red; };
         std::vector<Group> groups;
-        int counts[4] {};
+        int counts[onirique::deess::numTargets] {};
         bool det = false;
         for (int i = 0; i < N; ++i)
         {
@@ -266,7 +314,9 @@ public:
             {
                 cols.clear();
                 for (int i = gr.a; i < gr.b; ++i) cols.push_back (eng.column (w - N + i));
-                gr.who = onirique::deess::soundOf (cols.data(), (int) cols.size());
+                const int shapeWho = onirique::deess::soundOf (cols.data(), (int) cols.size());
+                // seuls les sons cochés sont traités : la lettre est celle d'un son coché (sinon, le détecteur qui a agi)
+                if (shapeWho >= 0 && shapeWho < onirique::deess::numTargets && enabled (shapeWho)) gr.who = shapeWho;
                 for (int i = gr.a; i < gr.b; ++i) colWho[(size_t) i] = gr.who;
             }
         }
@@ -323,7 +373,7 @@ public:
         }
         // le compte des 6 dernières secondes
         juce::String sum;
-        for (int t = 0; t < 4; ++t) sum << targetName (t) << " " << counts[t] << (t < 3 ? "   " : "");
+        for (int t = 0; t < onirique::deess::numTargets; ++t) sum << targetName (t) << " " << counts[t] << (t < onirique::deess::numTargets - 1 ? "   " : "");
         text (g, fr ("CE QUI EST RETIRÉ, SON PAR SON  ·  ") + sum, R (r.getX() + 16 * u, r.getBottom() - 22 * u, 520 * u, 16 * u), font (Face::mono, 9.0f * u), haze,
               juce::Justification::centredLeft);
     }
@@ -596,9 +646,21 @@ private:
             // la lettre, et le gain
             const auto foot = R (cr.getX(), cr.getBottom() - 24 * u, cr.getWidth(), 20 * u);
             chip (g, R (std::min (cr.getWidth() - 6 * u, 32 * u), 19 * u).withCentre ({ foot.getCentreX(), foot.getY() + 9 * u }), e.letter, c, u, e.muted ? 0.35f : 1.0f);
-            if ((hov || sel || std::abs (e.gainDb) >= 0.05f) && ! e.muted && cr.getWidth() > 34 * u)
-                text (g, std::abs (e.gainDb) < 0.05f ? juce::String ("0") : juce::String (e.gainDb, 1), R (cr.getX(), cr.getY() + 2 * u, cr.getWidth(), 12 * u),
-                      font (Face::mono, 9.0f * u), hov || sel ? bone : haze);
+            // la réduction, accrochée à sa ligne (au-dessus, ou en dessous si la ligne touche le haut), lisible sur fond sombre
+            if ((hov || sel || std::abs (e.gainDb) >= 0.05f) && ! e.muted && cr.getWidth() > 22 * u)
+            {
+                const juce::String v = std::abs (e.gainDb) < 0.05f ? juce::String ("0") : juce::String (e.gainDb, 1);
+                const float fs = cr.getWidth() > 40 * u ? 10.5f * u : 8.5f * u, h = fs + 5 * u;
+                const auto f = font (Face::mono, fs);
+                const float w = std::min (cr.getWidth() - 4 * u, juce::GlyphArrangement::getStringWidth (f, v) + 10 * u);
+                const float gy = gainToY (e.gainDb, col);
+                float ty = gy - h - 3 * u;
+                if (ty < cr.getY() + 2 * u) ty = gy + 3 * u;
+                const auto tag = R (w, h).withCentre ({ cr.getCentreX(), ty + h * 0.5f });
+                g.setColour (juce::Colour (0xff120c0e).withAlpha (0.8f));
+                g.fillRoundedRectangle (tag, h * 0.5f);
+                text (g, v, tag, f, hov || sel ? bone : bone.withAlpha (0.85f));
+            }
             if (e.muted) text (g, fr ("IGNORÉ"), R (cr.getX(), cr.getCentreY() - 6 * u, cr.getWidth(), 12 * u), font (Face::mono, 7.5f * u), haze);
         }
     }

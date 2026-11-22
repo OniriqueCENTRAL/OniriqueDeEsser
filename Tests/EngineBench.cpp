@@ -47,6 +47,17 @@ int main (int argc, char** argv)
         check (err < 1.0e-6, "écart max " + juce::String (err, 9) + " (latence " + juce::String (L) + " échantillons, " + juce::String (L / fs * 1000.0, 2) + " ms)");
         juce::ignoreUnused (ch);
     }
+    {
+        // LIVE : la latence courte, le son direct tout aussi exact
+        AutoDeEsser a; a.prepare (fs);
+        AutoDeEsser::Settings s; s.range = 0.0f; s.threshold = -60.0f; s.live = true;
+        std::vector<float> y = x;
+        for (int p = 0; p < n; p += 512) { float* c[1] { y.data() + p }; a.process (c, 1, std::min (512, n - p), s); }
+        const int L = a.latencyLive();
+        double err = 0.0;
+        for (int i = L; i < n; ++i) err = std::max (err, (double) std::abs (y[(size_t) i] - x[(size_t) (i - L)]));
+        check (err < 1.0e-6 && L < a.latency(), "LIVE : écart max " + juce::String (err, 9) + " (latence " + juce::String (L / fs * 1000.0, 2) + " ms)");
+    }
 
     std::cout << "2. AUTO : les bouffées aiguës baissées et marquées S, la voix intacte\n";
     {
@@ -67,9 +78,9 @@ int main (int argc, char** argv)
         const double redBurst = rms (xb, 1.62, 1.73, 0) - rms (yb, 1.62, 1.73, L), redVoice = rms (x, 1.1, 1.5, 0) - rms (y, 1.1, 1.5, L);
         check (redBurst > 4.0, "zone des S (4-10 kHz) de la bouffée baissée de " + juce::String (redBurst, 1) + " dB");
         check (std::abs (redVoice) < 0.3, "voix (220 Hz) changée de " + juce::String (redVoice, 2) + " dB");
-        int marked[4] {}, cols = 0;
+        int marked[5] {}, cols = 0;
         for (int i = 0; i < a.writeIndex(); ++i) { const auto c = a.column (i); if (c.who >= 0) marked[c.who]++; ++cols; }
-        check (marked[0] > 20 && marked[1] + marked[2] + marked[3] == 0, "colonnes marquées S : " + juce::String (marked[0]) + " (T/CH/F : " + juce::String (marked[1] + marked[2] + marked[3]) + ")");
+        check (marked[0] > 20 && marked[1] + marked[2] + marked[3] + marked[4] == 0, "colonnes marquées S : " + juce::String (marked[0]) + " (T/CH/F/K : " + juce::String (marked[1] + marked[2] + marked[3] + marked[4]) + ")");
     }
 
     std::cout << "3. MANUEL : le gain à sa place dans le temps du DAW\n";
@@ -127,7 +138,7 @@ int main (int argc, char** argv)
             AutoDeEsser::Settings s;
             for (auto& o : s.on) o = true;
             const int nc = std::min (2, buf.getNumChannels());
-            int groups[4] {}, last = -1;
+            int groups[5] {}, last = -1;
             float maxRed = 0;
             for (int p = 0; p < len; p += 512)
             {
@@ -146,7 +157,7 @@ int main (int argc, char** argv)
             bool finite = true;
             for (int c = 0; c < nc; ++c) for (int i = 0; i < len; ++i) if (! std::isfinite (buf.getSample (c, i))) finite = false;
             check (finite, "sortie finie");
-            std::cout << "       THRESHOLD -30 : retraits S " << groups[0] << ", T " << groups[1] << ", CH " << groups[2] << ", F " << groups[3]
+            std::cout << "       THRESHOLD -30 : retraits S " << groups[0] << ", T " << groups[1] << ", CH " << groups[2] << ", F " << groups[3] << ", K " << groups[4]
                       << " ; réduction max " << maxRed << " dB\n";
         }
     }

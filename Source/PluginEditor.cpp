@@ -21,8 +21,8 @@ const R reductionBox { 960, 474, 200, 206 };
 SoloEditor::SoloEditor (SoloProcessor& proc)
     : AudioProcessorEditor (proc), processor (proc),
       mode (p (params::mode), { "AUTO", "MANUEL" }),
-      tS (p (params::targetS), "S"), tT (p (params::targetT), "T"), tCH (p (params::targetCH), "CH"), tF (p (params::targetF), "F"),
-      listen (p (params::listen), "LISTEN"),
+      tS (p (params::targetS), "S"), tT (p (params::targetT), "T"), tCH (p (params::targetCH), "CH"), tF (p (params::targetF), "F"), tK (p (params::targetK), "K"),
+      listen (p (params::listen), "LISTEN"), live (p (params::live)),
       threshold (p (params::threshold), "THRESHOLD", knobLook), range (p (params::range), "RANGE", knobLook),
       freq (p (params::freq), "FREQ", knobLook), clarity (p (params::clarity), "CLARITY", knobLook),
       autoView (proc),
@@ -50,12 +50,14 @@ SoloEditor::SoloEditor (SoloProcessor& proc)
     addAndMakeVisible (mode);
     mode.setTooltip (fr ("AUTO : un de-esser classique, réglé par le THRESHOLD. MANUEL : capture ta prise et règle chaque S, chaque T, chaque respiration à la main."));
     // AUTO
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &listen, &threshold, &range, &freq, &clarity, &autoView })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &tK, &listen, &live, &threshold, &range, &freq, &clarity, &autoView })
         addChildComponent (c);
+    live.setTooltip (fr ("LIVE : pour enregistrer en chantant à travers le plugin. Presque pas de latence (3 ms) ; le tri entre S, T, CH, F et K se fait sur les premières ms du son, un peu moins précis. Décoché (mix) : le tri écoute 30 ms du son pour ne toucher que ce que tu as coché."));
     tS.setTooltip (fr ("S : les S et les Z, à la fréquence FREQ."));
     tT.setTooltip (fr ("T : les attaques de T, vers 4,2 kHz."));
     tCH.setTooltip (fr ("CH : les CH et les J, vers 3,2 kHz."));
     tF.setTooltip (fr ("F : le souffle aigu (F, air), vers 9 kHz."));
+    tK.setTooltip (fr ("K : les attaques de K, vers 4 kHz (plus sourdes que les T)."));
     listen.setTooltip (fr ("LISTEN : n'entendre que ce qui est retiré."));
     threshold.setTip (fr ("THRESHOLD : au-dessus de ce niveau, le son est baissé. Plus bas, plus de S retirés. Tu peux aussi glisser la ligne dans la vue."));
     range.setTip (fr ("RANGE : la réduction la plus forte permise (dB)."));
@@ -187,7 +189,7 @@ void SoloEditor::showMode()
 {
     const bool man = processor.isManual();
     manualShown = man;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &listen, &threshold, &range, &freq, &clarity, &autoView })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &tK, &listen, &live, &threshold, &range, &freq, &clarity, &autoView })
         c->setVisible (! man);
     for (juce::Component* c : std::initializer_list<juce::Component*> { &famSib, &famCons, &famBreath, &viewCols, &viewLine, &capture, &manualView,
                                                                          &tameSib, &tameCons, &tameBreath, &inspector, &hoverListen, &clear })
@@ -233,9 +235,10 @@ void SoloEditor::resized()
 
     place (mode, R (t.getX(), t.getY(), 230, t.getHeight())); mode.setScale (s);
     // AUTO
-    float x = t.getRight() - 96 - 4 * 64;
-    for (auto* sw : { &tS, &tT, &tCH, &tF }) { place (*sw, R (x, t.getY(), 60, t.getHeight())); sw->setScale (s); x += 64; }
+    float x = t.getRight() - 96 - 5 * 64;
+    for (auto* sw : { &tS, &tT, &tCH, &tF, &tK }) { place (*sw, R (x, t.getY(), 60, t.getHeight())); sw->setScale (s); x += 64; }
     place (listen, R (t.getRight() - 96, t.getY(), 96, t.getHeight())); listen.setScale (s);
+    place (live, R (270, t.getY(), 200, t.getHeight())); live.setScale (s);
     place (autoView, layout::view); autoView.setScale (s);
     const float ky = layout::bottom.getCentreY() + 2;
     knob (threshold, { 150, ky }, { 160, 190 });

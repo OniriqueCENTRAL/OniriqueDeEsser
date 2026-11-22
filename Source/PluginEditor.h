@@ -47,7 +47,8 @@ private:
 
     ui::Segments mode;
     // AUTO
-    ui::Switch tS, tT, tCH, tF, listen;
+    ui::Switch tS, tT, tCH, tF, tK, listen;
+    dui::LiveCheck live;
     ui::Knob threshold, range, freq, clarity;
     dui::AutoView autoView;
     float grShown = 0.0f;

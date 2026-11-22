@@ -94,6 +94,7 @@ private:
     void process (juce::AudioBuffer<float>&, bool bypassed);
     void timerCallback() override;
     onirique::deess::AutoDeEsser::Settings readAuto() const;
+    bool liveNow() const noexcept { return pLive != nullptr && pLive->load() > 0.5f && pMode->load() < 0.5f; }   // LIVE ne vaut qu'en AUTO
     void applyTame();
     void publish();
     void launchAnalysis();
@@ -131,15 +132,17 @@ private:
     int dbgWritten = 0, dbgSkipped = 0;
 
     double rate = 0.0;
-    int latency = 0;
+    int latency = 0, latencyMix = 0, latencyLive = 0;
+    std::atomic<int> latencyNow { 0 };   // celle du moment (LIVE en AUTO : courte), lue par le fil audio
+    bool liveReported = false;
     std::atomic<bool> capturing { true }, playing { false }, ready { false };
     std::atomic<juce::int64> hostPos { 0 };
     juce::AudioBuffer<float> scratch, other;
     juce::SmoothedValue<float> modeS, bypassS;
-    onirique::DelayLine dryDelay[2];
+    onirique::DelayLine dryDelay[2], dryDelayLive[2];
     std::vector<float> mono;
-    std::atomic<float> *pMode = nullptr, *pBypass = nullptr, *pThr = nullptr, *pRange = nullptr, *pFreq = nullptr, *pClar = nullptr, *pListen = nullptr,
-                       *pT[4] {}, *pTame[3] {};
+    std::atomic<float> *pMode = nullptr, *pBypass = nullptr, *pThr = nullptr, *pRange = nullptr, *pFreq = nullptr, *pClar = nullptr, *pListen = nullptr, *pLive = nullptr,
+                       *pT[5] {}, *pTame[3] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SoloProcessor)
 };

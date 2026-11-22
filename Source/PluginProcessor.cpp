@@ -10,8 +10,8 @@ SoloProcessor::SoloProcessor()
 {
     auto raw = [this] (const juce::String& id) { return apvts.getRawParameterValue (id); };
     pMode = raw (params::mode); pBypass = raw (params::bypass); pThr = raw (params::threshold); pRange = raw (params::range);
-    pFreq = raw (params::freq); pClar = raw (params::clarity); pListen = raw (params::listen);
-    pT[0] = raw (params::targetS); pT[1] = raw (params::targetT); pT[2] = raw (params::targetCH); pT[3] = raw (params::targetF);
+    pFreq = raw (params::freq); pClar = raw (params::clarity); pListen = raw (params::listen); pLive = raw (params::live);
+    pT[0] = raw (params::targetS); pT[1] = raw (params::targetT); pT[2] = raw (params::targetCH); pT[3] = raw (params::targetF); pT[4] = raw (params::targetK);
     pTame[0] = raw (params::tameSib); pTame[1] = raw (params::tameCons); pTame[2] = raw (params::tameBreath);
     apvts.state.setProperty ("preset", "INIT", nullptr);
     captureId = juce::Uuid().toString();
@@ -43,9 +43,14 @@ void SoloProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     ready.store (false);
     rate = sampleRate;
     autoDs.prepare (rate);
-    latency = autoDs.latency();
+    latency = latencyMix = autoDs.latency();
+    latencyLive = autoDs.latencyLive();
     manual.prepare (rate, latency);
-    for (auto& d : dryDelay) d.prepare (latency);
+    for (auto& d : dryDelay) d.prepare (latencyMix);
+    for (auto& d : dryDelayLive) d.prepare (latencyLive);
+    liveReported = liveNow();
+    latency = liveReported ? latencyLive : latencyMix;
+    latencyNow.store (latency);
     const int maxN = std::max (4096, samplesPerBlock * 2);
     scratch.setSize (2, maxN);
     other.setSize (2, maxN);
@@ -63,6 +68,7 @@ AutoDeEsser::Settings SoloProcessor::readAuto() const
     s.threshold = pThr->load(); s.range = pRange->load(); s.freq = pFreq->load(); s.clarity = pClar->load();
     for (int t = 0; t < numTargets; ++t) s.on[t] = pT[t]->load() > 0.5f;
     s.listen = pListen->load() > 0.5f;
+    s.live = liveNow();
     return s;
 }
 
@@ -87,7 +93,7 @@ void SoloProcessor::process (juce::AudioBuffer<float>& buffer, bool bypassed)
             if (info->getIsPlaying() || info->getIsRecording())
                 if (auto t = info->getTimeInSamples()) { rolling = true; pos = *t; }
     playing.store (rolling);
-    if (rolling) hostPos.store (pos - latency);
+    if (rolling) hostPos.store (pos - latencyNow.load());
 #if ONIRIQUE_UI_TEST
     dbgBlocks.fetch_add (1); if (rolling) dbgRolling.fetch_add (1);
 #endif
@@ -125,7 +131,8 @@ void SoloProcessor::process (juce::AudioBuffer<float>& buffer, bool bypassed)
     for (int c = 0; c < ch; ++c)
     {
         auto* d = scratch.getWritePointer (c);
-        for (int i = 0; i < n; ++i) d[i] = dryDelay[c].process (d[i]);
+        const bool lv = liveNow();
+        for (int i = 0; i < n; ++i) { const float a = dryDelay[c].process (d[i]), b = dryDelayLive[c].process (d[i]); d[i] = lv ? b : a; }
     }
     if (bypassS.isSmoothing() || bypassS.getTargetValue() > 0.5f)
         for (int i = 0; i < n; ++i)
@@ -327,6 +334,14 @@ void SoloProcessor::timerCallback()
             }
     }
 #endif
+    // LIVE (en AUTO seulement) : la latence courte ; le DAW est prévenu quand elle change
+    if (ready.load() && liveNow() != liveReported)
+    {
+        liveReported = liveNow();
+        latency = liveReported ? latencyLive : latencyMix;
+        latencyNow.store (latency);
+        setLatencySamples (latency);
+    }
     manual.collect();
     if (! manual.isPlaying()) listening = -1;
 
