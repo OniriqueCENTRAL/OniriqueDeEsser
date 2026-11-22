@@ -12,7 +12,9 @@ namespace onirique::deess
     Fil audio -> Fifo : des paquets de 512 échantillons (mono) avec leur position, sans verrou ni allocation.
     Fil des messages -> Store : les paquets vidés de la Fifo (minuterie), rangés par blocs de 32768 échantillons alloués à la
     demande ; chaque bloc sait quels morceaux de 512 ont été enregistrés (un bit chacun). Rien n'est gardé là où le DAW n'a
-    pas joué : une prise de 3 minutes au milieu d'un morceau ne coûte que ses 3 minutes.
+    pas joué (ni le silence) : une prise de 3 minutes au milieu d'un morceau ne coûte que ses 3 minutes.
+    La capture est automatique en MANUEL : un passage déjà gardé et identique n'est pas réécrit (rien à réanalyser) ; un
+    passage nouveau, ou dont le son a changé (une autre prise posée au même endroit), est enregistré et réanalysé.
     Sauvegarde : les blocs (en 16 bits) compressés, dans un fichier à côté (le projet ne garde que son nom). */
 
 class Fifo
@@ -83,6 +85,18 @@ public:
             pos += k; x += k; n -= k;
         }
         ++revision;
+    }
+
+    /** Tout [pos, pos + n) a-t-il déjà été enregistré ? */
+    bool covers (juce::int64 pos, int n) const
+    {
+        if (pos < 0 || n <= 0) return false;
+        for (juce::int64 p = pos; p < pos + n; p = (p / sub + 1) * sub)
+        {
+            const auto it = chunks.find (p / chunk);
+            if (it == chunks.end() || ! ((it->second.mask >> (int) ((p % chunk) / sub)) & 1ull)) return false;
+        }
+        return true;
     }
 
     /** Lit [pos, pos + n) : des zéros là où rien n'a été capturé. */

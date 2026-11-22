@@ -5,7 +5,8 @@ Le DE-ESSER de VOCALBOX en plugin seul, avec deux modes.
 - **AUTO** : un de-esser classique réglé par un THRESHOLD (ligne qu'on glisse dans la vue). S (à la fréquence FREQ), T, CH, F
   cochés ; RANGE (réduction max), CLARITY (l'éclat rendu sans les S), LISTEN (seulement ce qui est retiré). La vue montre ce
   qui est retiré, son par son, avec la lettre (S, T, CH, F) au-dessus de chaque retrait.
-- **MANUEL** : CAPTURE enregistre la prise pendant que le DAW la joue ; elle est découpée en événements (SIBILANCES S Z CH F,
+- **MANUEL** : la prise s'enregistre toute seule pendant que le DAW la joue (CAPTURE AUTO, seulement ce qui est nouveau ou a
+  changé : une réécoute ne réenregistre rien, une piste ajoutée s'ajoute) ; elle est découpée en événements (SIBILANCES S Z CH F,
   CONSONNES P B T K, RESPIRATIONS) réglés un par un : vue en COLONNES ou TIMELINE, survol = écoute, glisser = baisser,
   double-clic = rendu à TOUT RÉDUIRE (une dose par famille, les plus saillants davantage). Le gain est appliqué pendant la
   lecture à la position du DAW (fondus 5 ms, 20 ms pour une respiration) ; la latence est la même dans les deux modes.

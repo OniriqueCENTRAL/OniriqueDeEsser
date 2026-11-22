@@ -17,9 +17,6 @@ SoloProcessor::SoloProcessor()
     captureId = juce::Uuid().toString();
     worker.startThread (juce::Thread::Priority::low);
     startTimerHz (30);
-#if ONIRIQUE_UI_TEST
-    if (juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_AUTOCAPTURE", {}).isNotEmpty()) capturing.store (true);   // banc « DAW simulé »
-#endif
 }
 
 SoloProcessor::~SoloProcessor()
@@ -92,11 +89,12 @@ void SoloProcessor::process (juce::AudioBuffer<float>& buffer, bool bypassed)
     playing.store (rolling);
     if (rolling) hostPos.store (pos - latency);
 #if ONIRIQUE_UI_TEST
-    dbgBlocks.fetch_add (1); if (rolling) dbgRolling.fetch_add (1); if (rolling && capturing.load()) dbgCaptured.fetch_add (1);
+    dbgBlocks.fetch_add (1); if (rolling) dbgRolling.fetch_add (1);
 #endif
 
-    // CAPTURE : la prise, telle qu'elle entre (mono), à sa place dans le temps
-    if (rolling && capturing.load())
+    // CAPTURE (automatique en MANUEL) : la prise, telle qu'elle entre (mono), à sa place dans le temps ; le fil des messages
+    // garde seulement ce qui est nouveau
+    if (rolling && capturing.load() && pMode->load() > 0.5f)
     {
         for (int i = 0; i < n; ++i) { float m = 0.0f; for (int c = 0; c < ch; ++c) m += buffer.getSample (c, i); mono[(size_t) i] = m / (float) std::max (1, ch); }
         fifo.push (pos, mono.data(), n);
@@ -154,9 +152,13 @@ void SoloProcessor::setCapturing (bool on)
     if (! on) lastCaptureMs = 0;   // l'analyse finit tout de suite ce qui reste
 }
 
+bool SoloProcessor::isRecording() const
+{
+    return lastCaptureMs != 0 && juce::Time::getMillisecondCounter() - lastCaptureMs < 500;
+}
+
 void SoloProcessor::clearCapture()
 {
-    capturing.store (false);
     fifo.drain ([] (juce::int64, const float*, int) {});
     worker.cancel.store (true);
     {
@@ -164,6 +166,7 @@ void SoloProcessor::clearCapture()
         evts.clear();
     }
     store.clear();
+    for (auto& c : tameRefCount) c = 0;
     juce::File old = captureFile();
     old.deleteFile();
     captureId = juce::Uuid().toString();
@@ -180,10 +183,7 @@ float SoloProcessor::tameGain (const Event& e) const
     const float a = juce::jlimit (0.0f, 1.0f, pTame[e.family]->load() * 0.01f);
     if (a <= 0.0f) return 0.0f;
     // la saillie médiane de la famille : les plus saillants baissent davantage (ce qu'on ferait à la main)
-    std::vector<float> s;
-    for (const auto& q : evts) if (q.family == e.family) s.push_back (q.saliencyDb);
-    float med = 0.0f;
-    if (! s.empty()) { std::nth_element (s.begin(), s.begin() + (long) s.size() / 2, s.end()); med = s[s.size() / 2]; }
+    const float med = tameRef[e.family];
     const float over = std::max (0.0f, e.saliencyDb - med + 3.0f);
     float g = 0.0f;
     switch (e.family)
@@ -197,13 +197,23 @@ float SoloProcessor::tameGain (const Event& e) const
 
 void SoloProcessor::applyTame()
 {
-    // la médiane se calcule une fois par famille
-    float med[3] {};
+    // la référence de chaque famille (sa saillie médiane) : libre tant que TOUT RÉDUIRE est à 0, refaite quand on y touche,
+    // puis figée (sauf si la prise change de 30 % et d'au moins 10 événements) : un bout de piste ajouté plus tard ne
+    // retouche pas les gains déjà posés
+    float* med = tameRef;
     for (int f = 0; f < numFamilies; ++f)
     {
         std::vector<float> s;
         for (const auto& q : evts) if (q.family == f) s.push_back (q.saliencyDb);
-        if (! s.empty()) { std::nth_element (s.begin(), s.begin() + (long) s.size() / 2, s.end()); med[f] = s[s.size() / 2]; }
+        const int n = (int) s.size();
+        const bool bigChange = std::abs (n - tameRefCount[f]) >= 10 && (n >= tameRefCount[f] * 13 / 10 || n * 10 <= tameRefCount[f] * 7);
+        if (n > 0 && (tameRefCount[f] == 0 || tameFresh[f] || pTame[f]->load() <= 0.0f || bigChange))
+        {
+            std::nth_element (s.begin(), s.begin() + (long) n / 2, s.end());
+            med[f] = s[(size_t) n / 2];
+            tameRefCount[f] = n;
+        }
+        tameFresh[f] = false;
     }
     const juce::ScopedLock sl (evLock);
     for (auto& e : evts)
@@ -321,10 +331,24 @@ void SoloProcessor::timerCallback()
     if (! manual.isPlaying()) listening = -1;
 
     // la capture : la Fifo vidée dans la prise
+    // seulement ce qui est nouveau : un passage déjà gardé et identique (une réécoute) n'est ni réécrit ni réanalysé
     bool got = false;
     fifo.drain ([this, &got] (juce::int64 pos, const float* x, int n)
     {
+        float pk = 0.0f;
+        for (int i = 0; i < n; ++i) pk = std::max (pk, std::abs (x[i]));
+        if (store.covers (pos, n))
+        {
+            float old[onirique::deess::Fifo::packet];
+            store.read (pos, old, n);
+            double diff = 0.0, ref = 0.0;
+            for (int i = 0; i < n; ++i) { const double d = (double) x[i] - old[i]; diff += d * d; ref += (double) old[i] * old[i] + (double) x[i] * x[i]; }
+            // pareil à -34 dB près (la prise gardée est en 16 bits) : rien à faire
+            if (diff <= 4.0e-4 * ref + 1.0e-9 * n) { ++dbgSkipped; return; }
+        }
+        else if (pk < 3.0e-5f) { ++dbgSkipped; return; }   // du silence jamais enregistré : inutile de le garder
         store.write (pos, x, n);
+        ++dbgWritten;
         dirtyFrom = dirtyFrom < 0 ? pos : std::min (dirtyFrom, pos);
         dirtyTo = std::max (dirtyTo, pos + n);
         got = true;
@@ -349,7 +373,7 @@ void SoloProcessor::timerCallback()
 
     // TOUT RÉDUIRE
     bool tameMoved = false;
-    for (int f = 0; f < 3; ++f) if (pTame[f]->load() != tameSeen[f]) { tameSeen[f] = pTame[f]->load(); tameMoved = true; }
+    for (int f = 0; f < 3; ++f) if (pTame[f]->load() != tameSeen[f]) { tameSeen[f] = pTame[f]->load(); tameFresh[f] = true; tameMoved = true; }
     if (tameMoved) { applyTame(); ++evRevision; publish(); }
 }
 
@@ -445,9 +469,11 @@ void SoloProcessor::getStateInformation (juce::MemoryBlock& dest)
     man.setProperty ("capture", store.empty() ? juce::String() : captureId, nullptr);
     man.setProperty ("rate", captureRate(), nullptr);
     man.setProperty ("hoverListen", hoverListen, nullptr);
+    man.setProperty ("autoCapture", capturing.load(), nullptr);
 #if ONIRIQUE_UI_TEST
-    man.setProperty ("dbg", juce::String (dbgBlocks.load()) + "/" + juce::String (dbgRolling.load()) + "/" + juce::String (dbgCaptured.load()) + " cap=" + juce::String ((int) capturing.load())
-                            + " spans=" + juce::String ((int) store.spans().size()), nullptr);
+    man.setProperty ("dbg", juce::String (dbgBlocks.load()) + "/" + juce::String (dbgRolling.load()) + " ecrits=" + juce::String (dbgWritten) + " sautes=" + juce::String (dbgSkipped) + " cap=" + juce::String ((int) capturing.load())
+                            + " spans=" + juce::String ((int) store.spans().size())
+                            , nullptr);
 #endif
     {
         const juce::ScopedLock sl (evLock);
@@ -481,6 +507,7 @@ void SoloProcessor::setStateInformation (const void* data, int size)
 
     if (! man.isValid()) return;
     hoverListen = (bool) man.getProperty ("hoverListen", true);
+    capturing.store ((bool) man.getProperty ("autoCapture", true));
     std::vector<Event> got;
     const double was = (double) man.getProperty ("rate", 0.0), now = captureRate();
     const double k = was > 0.0 && rate > 0.0 && std::abs (was - now) > 1.0 ? now / was : 1.0;   // le projet rouvert à une autre fréquence

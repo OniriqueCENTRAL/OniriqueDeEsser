@@ -92,7 +92,8 @@ private:
 };
 
 //==============================================================================
-/** Le bouton CAPTURE : rond rouge qui pulse pendant l'enregistrement. */
+/** CAPTURE AUTO (allumée par défaut) : la prise s'enregistre toute seule à la lecture. Le rond pulse quand du nouveau est
+    gardé ; À JOUR quand la lecture ne lui apprend rien ; un clic la coupe ou la rallume. */
 class CaptureButton : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
@@ -101,25 +102,29 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto r = getLocalBounds().toFloat().reduced (1.0f);
-        const bool on = proc.isCapturing();
-        ui::fullPill (g, r, on ? 0.35f + 0.25f * pulse : 0.0f, isMouseOver() ? 1.0f : 0.0f, u);
+        const bool on = proc.isCapturing(), rec = on && proc.isRecording();
+        ui::fullPill (g, r, on ? (rec ? 0.45f + 0.3f * pulse : 0.3f) : 0.0f, isMouseOver() ? 1.0f : 0.0f, u);
         const float d = 10.0f * u;
         const auto dotR = R (d, d).withCentre ({ r.getX() + r.getHeight() * 0.6f, r.getCentreY() });
-        if (on) onirique::da::softGlowRect (g, dotR, d * 0.5f, juce::Colour (0xffff2a3d).withAlpha (0.5f + 0.4f * pulse), 8.0f * u);
-        g.setColour (on ? juce::Colour (0xffff2a3d) : juce::Colour (0xffff2a3d).withAlpha (0.65f));
+        if (rec) onirique::da::softGlowRect (g, dotR, d * 0.5f, juce::Colour (0xffff2a3d).withAlpha (0.5f + 0.4f * pulse), 8.0f * u);
+        g.setColour (on ? juce::Colour (0xffff2a3d).withAlpha (rec ? 1.0f : 0.8f) : ui::haze.withAlpha (0.5f));
         g.fillEllipse (dotR);
-        const juce::String t = on ? (proc.hostPlaying() ? fr ("CAPTURE…") : fr ("PRÊT : LANCE LA LECTURE")) : fr ("CAPTURE");
-        ui::text (g, t, r.withTrimmedLeft (r.getHeight() * 0.9f), ui::font (ui::Face::body, 10.5f * u, 0.14f), ui::bone);
+        const juce::String t = ! on ? fr ("CAPTURE COUPÉE") : rec ? fr ("ENREGISTRE…") : proc.hostPlaying() ? fr ("À JOUR") : fr ("CAPTURE AUTO");
+        ui::text (g, t, r.withTrimmedLeft (r.getHeight() * 0.9f), ui::font (ui::Face::body, 10.5f * u, 0.14f), ui::bone.withAlpha (on ? 1.0f : 0.6f));
     }
     void mouseUp (const juce::MouseEvent& e) override { if (getLocalBounds().contains (e.getPosition())) proc.setCapturing (! proc.isCapturing()); repaint(); }
 private:
     void timerCallback() override
     {
-        if (proc.isCapturing()) { phase += 0.12f; pulse = 0.5f + 0.5f * std::sin (phase); repaint(); }
-        else if (pulse != 0.0f) { pulse = 0.0f; repaint(); }
+        const bool rec = proc.isCapturing() && proc.isRecording();
+        if (rec) { phase += 0.12f; pulse = 0.5f + 0.5f * std::sin (phase); }
+        else pulse = 0.0f;
+        const int st = (proc.isCapturing() ? 1 : 0) + (rec ? 2 : 0) + (proc.hostPlaying() ? 4 : 0);
+        if (rec || st != seen) { seen = st; repaint(); }
     }
     SoloProcessor& proc;
     float u = 1.0f, phase = 0.0f, pulse = 0.0f;
+    int seen = -1;
 };
 
 //==============================================================================
@@ -366,8 +371,8 @@ public:
         if (rev != seenRev) { seenRev = rev; waves.clear(); overview.clear(); repaint(); }
         else if (play || listen || play != wasPlaying || listen != wasListening) repaint();
         wasPlaying = play; wasListening = listen;
-        // la timeline suit la lecture pendant la capture
-        if (timeline && play && proc.isCapturing()) follow();
+        // la timeline suit la lecture pendant qu'elle enregistre du nouveau
+        if (timeline && play && proc.isRecording()) follow();
     }
 
     void paint (juce::Graphics& g) override
@@ -378,8 +383,9 @@ public:
         const auto& ev = proc.events();
         if (proc.capture().empty() && ev.empty())
         {
-            text (g, fr ("Clique sur CAPTURE, puis lance la lecture de ta prise dans le DAW."), r.withTrimmedBottom (r.getHeight() * 0.1f),
-                  font (Face::body, 15.0f * u), bone.withAlpha (0.85f));
+            text (g, proc.isCapturing() ? fr ("Lance la lecture de ta prise dans le DAW : elle s'enregistre toute seule.")
+                                        : fr ("La capture est coupée : rallume CAPTURE AUTO, puis lance la lecture."),
+                  r.withTrimmedBottom (r.getHeight() * 0.1f), font (Face::body, 15.0f * u), bone.withAlpha (0.85f));
             text (g, fr ("Chaque S, T, CH, P et chaque respiration apparaît ici : tu le survoles, tu l'entends, tu le baisses à la main."),
                   r.withTrimmedTop (r.getHeight() * 0.12f), font (Face::body, 11.5f * u), haze);
             return;

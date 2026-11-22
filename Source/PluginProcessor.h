@@ -19,8 +19,8 @@
 //  ONIRIQUE DE-ESSER : le processeur. Mono ou stéréo, latence fixe (l'anticipation du de-esser, ~3 ms), la même dans les
 //  deux modes. Passer de AUTO à MANUEL se fait en fondu (30 ms).
 //
-//  MANUEL : CAPTURE enregistre la prise pendant que le DAW la joue ; l'analyse (fil à part) la découpe en événements au
-//  fur et à mesure ; chaque événement se règle à la main ou par TOUT RÉDUIRE. Les événements et le nom du fichier de
+//  MANUEL : la prise s'enregistre toute seule pendant que le DAW la joue (CAPTURE AUTO), seulement ce qui est nouveau ou a
+//  changé ; l'analyse (fil à part) la découpe en événements au fur et à mesure ; chaque événement se règle à la main ou par TOUT RÉDUIRE. Les événements et le nom du fichier de
 //  capture vont dans le projet ; l'audio capturé, dans un fichier à part (dossier ONIRIQUE DE-ESSER/Captures).
 //==============================================================================
 class SoloProcessor : public juce::AudioProcessor, private juce::Timer
@@ -69,7 +69,8 @@ public:
     int eventsRevision() const { return evRevision; }
     double captureRate() const { return rate > 0.0 ? rate : 44100.0; }
 
-    bool isCapturing() const { return capturing.load(); }
+    bool isCapturing() const { return capturing.load(); }   // CAPTURE AUTO (allumée par défaut)
+    bool isRecording() const;                                // du nouveau vient d'être enregistré
     void setCapturing (bool on);
     void clearCapture();
     bool isAnalysing() const { return analysing; }
@@ -121,14 +122,17 @@ private:
     juce::int64 dirtyFrom = -1, dirtyTo = -1;
     juce::uint32 lastCaptureMs = 0, lastLaunchMs = 0;
     bool storeDirty = false, analysing = false;
-    float tameSeen[3] { -1, -1, -1 };
+    float tameSeen[3] { -1, -1, -1 }, tameRef[3] {};
+    int tameRefCount[3] {};
+    bool tameFresh[3] {};
     juce::String captureId;
     bool uiWavDone = false;
-    std::atomic<int> dbgBlocks { 0 }, dbgRolling { 0 }, dbgCaptured { 0 };
+    std::atomic<int> dbgBlocks { 0 }, dbgRolling { 0 };
+    int dbgWritten = 0, dbgSkipped = 0;
 
     double rate = 0.0;
     int latency = 0;
-    std::atomic<bool> capturing { false }, playing { false }, ready { false };
+    std::atomic<bool> capturing { true }, playing { false }, ready { false };
     std::atomic<juce::int64> hostPos { 0 };
     juce::AudioBuffer<float> scratch, other;
     juce::SmoothedValue<float> modeS, bypassS;

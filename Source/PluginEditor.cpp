@@ -81,7 +81,8 @@ SoloEditor::SoloEditor (SoloProcessor& proc)
     viewCols.setLit (true);
     viewCols.setTooltip (fr ("Une colonne par événement de la famille choisie."));
     viewLine.setTooltip (fr ("Toute la prise, les événements à leur place."));
-    capture.setTooltip (fr ("CAPTURE : lance la lecture dans le DAW, la prise est enregistrée et découpée en événements au fur et à mesure. Reclique pour arrêter."));
+    capture.setTooltip (fr ("CAPTURE AUTO : à chaque lecture, ce qui est nouveau (une piste ajoutée, une prise changée) est enregistré et découpé en événements. "
+                            "Ce qui est déjà gardé n'est pas réenregistré. Clique pour couper ou rallumer."));
     tameSib.setTooltip (fr ("TOUT RÉDUIRE : baisse tous les S d'un coup, les plus forts davantage. Ceux que tu as réglés à la main ne bougent plus."));
     tameCons.setTooltip (fr ("TOUT RÉDUIRE : baisse toutes les plosives et attaques, les plus fortes davantage."));
     tameBreath.setTooltip (fr ("TOUT RÉDUIRE : baisse toutes les respirations."));
@@ -242,11 +243,11 @@ void SoloEditor::resized()
     knob (freq, { 600, ky }, { 150, 180 });
     knob (clarity, { 810, ky }, { 150, 180 });
     // MANUEL
-    x = 270;
-    for (auto* f : { &famSib, &famCons, &famBreath }) { place (*f, R (x, t.getY(), 172, t.getHeight())); f->setScale (s); x += 178; }
-    place (viewCols, R (812, t.getY(), 106, t.getHeight())); viewCols.setScale (s);
-    place (viewLine, R (922, t.getY(), 106, t.getHeight())); viewLine.setScale (s);
-    place (capture, R (1040, t.getY(), 120, t.getHeight())); capture.setScale (s);
+    x = 266;
+    for (auto* f : { &famSib, &famCons, &famBreath }) { place (*f, R (x, t.getY(), 162, t.getHeight())); f->setScale (s); x += 167; }
+    place (viewCols, R (776, t.getY(), 104, t.getHeight())); viewCols.setScale (s);
+    place (viewLine, R (884, t.getY(), 104, t.getHeight())); viewLine.setScale (s);
+    place (capture, R (1000, t.getY(), 160, t.getHeight())); capture.setScale (s);
     place (manualView, layout::view); manualView.setScale (s);
     {
         const auto b = layout::tameBox.reduced (8, 34);
@@ -344,16 +345,16 @@ void SoloEditor::paint (juce::Graphics& g)
         const auto o = layout::optionsBox.reduced (18, 16);
         const auto& st = processor.capture();
         juce::String line1, line2;
-        if (st.empty()) { line1 = fr ("Aucune prise capturée"); line2 = fr ("CAPTURE, puis lecture dans le DAW"); }
+        if (st.empty()) { line1 = fr ("Aucune prise capturée"); line2 = processor.isCapturing() ? fr ("lance la lecture dans le DAW") : fr ("capture coupée"); }
         else
         {
             double secs = 0; for (auto sp : st.spans()) secs += (double) (sp.second - sp.first) / processor.captureRate();
             line1 = fr ("Prise : ") + dui::timeText (secs);
-            line2 = processor.isCapturing() ? (processor.hostPlaying() ? fr ("enregistrement en cours") : fr ("en attente de la lecture"))
-                                            : processor.isAnalysing() ? fr ("analyse en cours…") : juce::String (processor.events().size()) + fr (" événements");
+            line2 = processor.isRecording() ? fr ("enregistre ce qui est nouveau")
+                  : processor.isAnalysing() ? fr ("analyse en cours…") : juce::String (processor.events().size()) + fr (" événements");
         }
         text (g, line1, R (o.getX(), o.getBottom() - 44, o.getWidth(), 18), font (Face::mono, 10.5f), bone, juce::Justification::centredLeft);
-        text (g, line2, R (o.getX(), o.getBottom() - 24, o.getWidth(), 18), font (Face::body, 10.0f), processor.isCapturing() ? accent : haze,
+        text (g, line2, R (o.getX(), o.getBottom() - 24, o.getWidth(), 18), font (Face::body, 10.0f), processor.isRecording() ? accent : haze,
               juce::Justification::centredLeft);
     }
 }
