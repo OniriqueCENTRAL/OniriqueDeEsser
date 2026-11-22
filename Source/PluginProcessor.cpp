@@ -341,10 +341,14 @@ void SoloProcessor::timerCallback()
         {
             float old[onirique::deess::Fifo::packet];
             store.read (pos, old, n);
-            double diff = 0.0, ref = 0.0;
-            for (int i = 0; i < n; ++i) { const double d = (double) x[i] - old[i]; diff += d * d; ref += (double) old[i] * old[i] + (double) x[i] * x[i]; }
-            // pareil à -34 dB près (la prise gardée est en 16 bits) : rien à faire
-            if (diff <= 4.0e-4 * ref + 1.0e-9 * n) { ++dbgSkipped; return; }
+            // la même prise, même plus forte ou moins forte (le volume de la piste a bougé) : rien à réenregistrer. On compare la
+            // FORME du son (corrélation), pas son niveau ; deux silences sont pareils aussi.
+            double xo = 0.0, xx = 0.0, oo = 0.0;
+            for (int i = 0; i < n; ++i) { xo += (double) x[i] * old[i]; xx += (double) x[i] * x[i]; oo += (double) old[i] * old[i]; }
+            const double quiet = 1.0e-8 * n;   // sous ~ -80 dBFS
+            const bool bothQuiet = std::max (xx, oo) < quiet;
+            const bool sameShape = xx > 1.0e-14 * n && oo > 1.0e-14 * n && xo / std::sqrt (xx * oo) > 0.97;
+            if (bothQuiet || sameShape) { ++dbgSkipped; return; }
         }
         else if (pk < 3.0e-5f) { ++dbgSkipped; return; }   // du silence jamais enregistré : inutile de le garder
         store.write (pos, x, n);

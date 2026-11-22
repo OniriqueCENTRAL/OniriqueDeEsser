@@ -50,6 +50,7 @@ public:
         a.reference();
         a.findSibilants (out);
         a.findConsonants (out);
+        a.findHighBursts (out);
         a.findBreaths (out);
         for (auto& e : out) { e.start += offset; e.end += offset; }
         std::sort (out.begin(), out.end(), [] (const Event& p, const Event& q) { return p.start < q.start; });
@@ -284,7 +285,9 @@ public:
                     vo0 /= (float) std::max (1, head - f);
                     juce::String letter;
                     float band = r.total;
-                    if (popJump && pop > 0.5 * body && pop > hi) { letter = vo0 > 0.6f ? "B" : "P"; band = 10.0f * std::log10 ((float) (pop / (e - f)) + 1.0e-13f) + 6.0f; }
+                    // P, B : le coup de grave doit dominer le corps de la voix (8 dB) ; une note chantée qui démarre fait aussi
+                    // monter le grave (son fondamental), mais avec ses harmoniques : ce n'est pas une plosive
+                    if (popJump && pop > 6.3 * body && pop > hi) { letter = vo0 > 0.6f ? "B" : "P"; band = 10.0f * std::log10 ((float) (pop / (e - f)) + 1.0e-13f) + 6.0f; }
                     else if (vo0 < 0.5f && hi > 0.35 * (pop + body + hi)) letter = "T";
                     else if (vo0 < 0.45f && ! popJump && hi > 0.12 * (pop + body + hi)) letter = "K";
                     if (letter.isNotEmpty())
@@ -294,6 +297,45 @@ public:
                         f = e + ms (30);
                         continue;
                     }
+                }
+            }
+            ++f;
+        }
+    }
+
+    // T au milieu d'une phrase (« Ti », « ête ») : un souffle aigu sans hauteur qui surgit d'un coup (12 dB de plus que les 15 ms
+    // d'avant), bref (moins de 45 ms : plus long, c'est une sibilance). L'attaque depuis le silence est vue plus haut.
+    void findHighBursts (std::vector<Event>& out) const
+    {
+        const int nF = (int) frames.size(), look = ms (15), longest = ms (45);
+        auto hf = [this] (int f) { const auto& r = frames[(size_t) f]; return sumDb (sumDb (r.ch, r.s), r.air); };
+        auto taken = [&] (juce::int64 a, juce::int64 b)
+        {
+            for (const auto& e : out) if (std::min (e.end, b) > std::max (e.start, a)) return true;
+            return false;
+        };
+        int f = look;
+        while (f < nF - 1)
+        {
+            const auto& r = frames[(size_t) f];
+            float prev = 1.0e9f;
+            for (int k = f - look; k < f; ++k) prev = std::min (prev, hf (k));
+            const float h = hf (f);
+            if (h - prev > 12.0f && h > r.total - 6.0f && r.voicing < 0.5f && h > r.voiceRef - 35.0f)
+            {
+                int e = f + 1;
+                float pk = h;
+                while (e < nF && e - f <= longest)
+                {
+                    pk = std::max (pk, hf (e));
+                    if (hf (e) < pk - 9.0f || frames[(size_t) e].voicing > 0.7f) break;
+                    ++e;
+                }
+                if (e - f >= ms (5) && e - f <= longest && ! taken (toSample (f), toSample (e)))
+                {
+                    out.push_back (make (f, e, consonant, "T", pk, 3.0f));
+                    f = e + ms (30);
+                    continue;
                 }
             }
             ++f;
