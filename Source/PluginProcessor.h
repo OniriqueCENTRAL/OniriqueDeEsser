@@ -141,7 +141,7 @@ private:
     juce::SmoothedValue<float> modeS, bypassS;
     onirique::DelayLine dryDelay[2], dryDelayLive[2];
     std::vector<float> mono;
-    std::atomic<float> *pMode = nullptr, *pBypass = nullptr, *pThr = nullptr, *pRange = nullptr, *pFreq = nullptr, *pClar = nullptr, *pListen = nullptr, *pLive = nullptr,
+    std::atomic<float> *pMode = nullptr, *pBypass = nullptr, *pThr = nullptr, *pRange = nullptr, *pFreq = nullptr, *pClar = nullptr, *pListen = nullptr, *pLive = nullptr, *pPan = nullptr,
                        *pT[5] {}, *pTame[3] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SoloProcessor)

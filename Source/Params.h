@@ -12,7 +12,7 @@
 namespace params
 {
 inline const juce::String mode = "mode", threshold = "threshold", range = "range", freq = "freq",
-                          targetS = "targetS", targetT = "targetT", targetCH = "targetCH", targetF = "targetF", targetK = "targetK", live = "autoLive",
+                          targetS = "targetS", targetT = "targetT", targetCH = "targetCH", targetF = "targetF", targetK = "targetK", live = "autoLive", sibPan = "sibPan",
                           clarity = "clarity", listen = "listen",
                           tameSib = "tameSibilance", tameCons = "tameConsonant", tameBreath = "tameBreath",
                           bypass = "bypass";
@@ -39,6 +39,10 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout layout()
     p.push_back (std::make_unique<AudioParameterBool> (ParameterID { targetF, 1 }, "F", false));
     p.push_back (std::make_unique<AudioParameterBool> (ParameterID { targetK, 2 }, "K", false));
     p.push_back (std::make_unique<AudioParameterBool> (ParameterID { live, 2 }, "Live", false));
+    // PAN des sibilances : L 100 … C … R 100
+    p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { sibPan, 3 }, "Sibilance Pan", NormalisableRange<float> (-100.0f, 100.0f, 1.0f), 0.0f,
+                                                        Attr().withStringFromValueFunction ([] (float v, int) { const int k = roundToInt (v); return k == 0 ? String ("C") : (k < 0 ? "L " : "R ") + String (std::abs (k)); })
+                                                              .withValueFromStringFunction ([] (const String& t) { const auto s = t.trim().toUpperCase(); const float v = s.retainCharacters ("0123456789.").getFloatValue(); return s.startsWith ("L") ? -v : v; })));
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { clarity, 1 }, "Clarity", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f,
                                                         Attr().withLabel ("%").withStringFromValueFunction (pct)));
     p.push_back (std::make_unique<AudioParameterBool> (ParameterID { listen, 1 }, "Listen", false));

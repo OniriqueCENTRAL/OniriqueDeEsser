@@ -25,6 +25,7 @@ SoloEditor::SoloEditor (SoloProcessor& proc)
       listen (p (params::listen), "LISTEN"), live (p (params::live)),
       threshold (p (params::threshold), "THRESHOLD", knobLook), range (p (params::range), "RANGE", knobLook),
       freq (p (params::freq), "FREQ", knobLook), clarity (p (params::clarity), "CLARITY", knobLook),
+      sibPan (p (params::sibPan), "PAN S", knobLook, true), sibPanManual (p (params::sibPan)),
       autoView (proc),
       famSib (dui::familyName (0)), famCons (dui::familyName (1)), famBreath (dui::familyName (2)),
       viewCols ("COLONNES"), viewLine ("TIMELINE"), hoverListen (fr ("ÉCOUTE AU SURVOL")), clear (fr ("EFFACER LA CAPTURE")),
@@ -50,7 +51,7 @@ SoloEditor::SoloEditor (SoloProcessor& proc)
     addAndMakeVisible (mode);
     mode.setTooltip (fr ("AUTO : un de-esser classique, réglé par le THRESHOLD. MANUEL : capture ta prise et règle chaque S, chaque T, chaque respiration à la main."));
     // AUTO
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &tK, &listen, &live, &threshold, &range, &freq, &clarity, &autoView })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &tK, &listen, &live, &threshold, &range, &freq, &clarity, &sibPan, &autoView })
         addChildComponent (c);
     live.setTooltip (fr ("LIVE : pour enregistrer en chantant à travers le plugin. Presque pas de latence (3 ms) ; le tri entre S, T, CH, F et K se fait sur les premières ms du son, un peu moins précis. Décoché (mix) : le tri écoute 30 ms du son pour ne toucher que ce que tu as coché."));
     tS.setTooltip (fr ("S : les S et les Z, à la fréquence FREQ."));
@@ -63,10 +64,12 @@ SoloEditor::SoloEditor (SoloProcessor& proc)
     range.setTip (fr ("RANGE : la réduction la plus forte permise (dB)."));
     freq.setTip (fr ("FREQ : où se trouvent tes S (3 à 10 kHz). Plus grave pour une voix grave, plus aigu pour une voix claire."));
     clarity.setTip (fr ("CLARITY : rend de l'éclat et de l'air après coup, sans faire revenir les S."));
+    sibPan.setTip (fr ("PAN S : déplace seulement les sibilances (S, CH, F cochés) de gauche à droite, pendant qu'elles passent. Le reste de la voix et la détection ne bougent pas. Double-clic : au centre."));
+    sibPanManual.setTooltip (fr ("PAN DES SIBILANCES : déplace seulement les événements SIBILANCES de gauche à droite. Le reste de la voix ne bouge pas. Double-clic : au centre."));
 
     // MANUEL
     for (juce::Component* c : std::initializer_list<juce::Component*> { &famSib, &famCons, &famBreath, &viewCols, &viewLine, &capture, &manualView,
-                                                                         &tameSib, &tameCons, &tameBreath, &inspector, &hoverListen, &clear })
+                                                                         &tameSib, &tameCons, &tameBreath, &inspector, &hoverListen, &clear, &sibPanManual })
         addChildComponent (c);
     famSib.setDot (dui::familyColour (0)); famCons.setDot (dui::familyColour (1)); famBreath.setDot (dui::familyColour (2));
     famSib.setTooltip (fr ("Les S, Z, CH et F."));
@@ -189,10 +192,10 @@ void SoloEditor::showMode()
 {
     const bool man = processor.isManual();
     manualShown = man;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &tK, &listen, &live, &threshold, &range, &freq, &clarity, &autoView })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &tS, &tT, &tCH, &tF, &tK, &listen, &live, &threshold, &range, &freq, &clarity, &sibPan, &autoView })
         c->setVisible (! man);
     for (juce::Component* c : std::initializer_list<juce::Component*> { &famSib, &famCons, &famBreath, &viewCols, &viewLine, &capture, &manualView,
-                                                                         &tameSib, &tameCons, &tameBreath, &inspector, &hoverListen, &clear })
+                                                                         &tameSib, &tameCons, &tameBreath, &inspector, &hoverListen, &clear, &sibPanManual })
         c->setVisible (man);
     if (! man) processor.listenStop();
     renderBackground();
@@ -241,10 +244,11 @@ void SoloEditor::resized()
     place (live, R (270, t.getY(), 200, t.getHeight())); live.setScale (s);
     place (autoView, layout::view); autoView.setScale (s);
     const float ky = layout::bottom.getCentreY() + 2;
-    knob (threshold, { 150, ky }, { 160, 190 });
-    knob (range, { 390, ky }, { 150, 180 });
-    knob (freq, { 600, ky }, { 150, 180 });
-    knob (clarity, { 810, ky }, { 150, 180 });
+    knob (threshold, { 112, ky }, { 160, 190 });
+    knob (range, { 296, ky }, { 150, 180 });
+    knob (freq, { 480, ky }, { 150, 180 });
+    knob (clarity, { 664, ky }, { 150, 180 });
+    knob (sibPan, { 848, ky }, { 150, 180 });
     // MANUEL
     x = 266;
     for (auto* f : { &famSib, &famCons, &famBreath }) { place (*f, R (x, t.getY(), 162, t.getHeight())); f->setScale (s); x += 167; }
@@ -263,6 +267,7 @@ void SoloEditor::resized()
         const auto o = layout::optionsBox.reduced (16, 16);
         place (hoverListen, R (o.getX(), o.getY() + 26, o.getWidth(), 32)); hoverListen.setScale (s);
         place (clear, R (o.getX(), o.getY() + 66, o.getWidth(), 32)); clear.setScale (s);
+        place (sibPanManual, R (o.getX() + 2, o.getY() + 106, o.getWidth() - 4, 38)); sibPanManual.setScale (s);
     }
 
 #if SOLO_LICENCE
@@ -303,7 +308,7 @@ void SoloEditor::renderBackground()
     {
         onirique::da::glass (g, layout::bottom.withWidth (920), 16.0f, 1.0f);
         g.setColour (juce::Colours::white.withAlpha (0.05f));
-        for (float xx : { 270.0f, 495.0f, 705.0f }) g.fillRect (xx, layout::bottom.getY() + 30, 1.0f, layout::bottom.getHeight() - 60);
+        for (float xx : { 204.0f, 388.0f, 572.0f, 756.0f }) g.fillRect (xx, layout::bottom.getY() + 30, 1.0f, layout::bottom.getHeight() - 60);
         onirique::da::glass (g, layout::reductionBox, 16.0f, 1.0f);
     }
 }
@@ -356,8 +361,8 @@ void SoloEditor::paint (juce::Graphics& g)
             line2 = processor.isRecording() ? fr ("enregistre ce qui est nouveau")
                   : processor.isAnalysing() ? fr ("analyse en cours…") : juce::String (processor.events().size()) + fr (" événements");
         }
-        text (g, line1, R (o.getX(), o.getBottom() - 44, o.getWidth(), 18), font (Face::mono, 10.5f), bone, juce::Justification::centredLeft);
-        text (g, line2, R (o.getX(), o.getBottom() - 24, o.getWidth(), 18), font (Face::body, 10.0f), processor.isRecording() ? accent : haze,
+        text (g, line1, R (o.getX(), o.getBottom() - 29, o.getWidth(), 15), font (Face::mono, 10.0f), bone, juce::Justification::centredLeft);
+        text (g, line2, R (o.getX(), o.getBottom() - 14, o.getWidth(), 15), font (Face::body, 9.5f), processor.isRecording() ? accent : haze,
               juce::Justification::centredLeft);
     }
 }

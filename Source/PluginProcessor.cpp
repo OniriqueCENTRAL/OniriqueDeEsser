@@ -10,7 +10,7 @@ SoloProcessor::SoloProcessor()
 {
     auto raw = [this] (const juce::String& id) { return apvts.getRawParameterValue (id); };
     pMode = raw (params::mode); pBypass = raw (params::bypass); pThr = raw (params::threshold); pRange = raw (params::range);
-    pFreq = raw (params::freq); pClar = raw (params::clarity); pListen = raw (params::listen); pLive = raw (params::live);
+    pFreq = raw (params::freq); pClar = raw (params::clarity); pListen = raw (params::listen); pLive = raw (params::live); pPan = raw (params::sibPan);
     pT[0] = raw (params::targetS); pT[1] = raw (params::targetT); pT[2] = raw (params::targetCH); pT[3] = raw (params::targetF); pT[4] = raw (params::targetK);
     pTame[0] = raw (params::tameSib); pTame[1] = raw (params::tameCons); pTame[2] = raw (params::tameBreath);
     apvts.state.setProperty ("preset", "INIT", nullptr);
@@ -69,6 +69,7 @@ AutoDeEsser::Settings SoloProcessor::readAuto() const
     for (int t = 0; t < numTargets; ++t) s.on[t] = pT[t]->load() > 0.5f;
     s.listen = pListen->load() > 0.5f;
     s.live = liveNow();
+    s.pan = pPan->load() / 100.0f;
     return s;
 }
 
@@ -117,7 +118,7 @@ void SoloProcessor::process (juce::AudioBuffer<float>& buffer, bool bypassed)
     for (int c = 0; c < ch; ++c) other.copyFrom (c, 0, buffer, c, 0, n);
     float* o2[2] { other.getWritePointer (0), other.getWritePointer (1) };
     autoDs.process (io, ch, n, readAuto());
-    manual.process (o2, ch, n, rolling, pos);
+    manual.process (o2, ch, n, rolling, pos, pPan->load() / 100.0f);
     if (modeS.isSmoothing())
         for (int i = 0; i < n; ++i)
         {
@@ -235,17 +236,20 @@ void SoloProcessor::applyTame()
 
 void SoloProcessor::publish()
 {
-    std::vector<Span> spans;
+    std::vector<Span> spans, sibilances;
     const double fs = captureRate();
     {
         const juce::ScopedLock sl (evLock);
         for (const auto& e : evts)
         {
-            if (e.muted || std::abs (e.gainDb) < 0.05f) continue;
+            if (e.muted) continue;
+            // le PAN des sibilances : toutes celles de la prise, baissées ou non
+            if (e.family == sibilance) sibilances.push_back ({ e.start, e.end, 1.0f, (int) std::lround (fs * 0.005) });
+            if (std::abs (e.gainDb) < 0.05f) continue;
             spans.push_back ({ e.start, e.end, juce::Decibels::decibelsToGain (e.gainDb), (int) std::lround (fs * (e.family == breath ? 0.02 : 0.005)) });
         }
     }
-    manual.publish (std::move (spans));
+    manual.publish (std::move (spans), std::move (sibilances));
 }
 
 void SoloProcessor::setEventGain (int i, float db)

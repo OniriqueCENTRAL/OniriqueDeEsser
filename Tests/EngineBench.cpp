@@ -83,6 +83,30 @@ int main (int argc, char** argv)
         check (marked[0] > 20 && marked[1] + marked[2] + marked[3] + marked[4] == 0, "colonnes marquées S : " + juce::String (marked[0]) + " (T/CH/F/K : " + juce::String (marked[1] + marked[2] + marked[3] + marked[4]) + ")");
     }
 
+    std::cout << "2b. AUTO, PAN des sibilances : seules les sibilances bougent, la détection ne change pas\n";
+    {
+        auto run = [&] (float pan, std::vector<float>& l, std::vector<float>& r, std::vector<Column>& cols)
+        {
+            AutoDeEsser a; a.prepare (fs);
+            AutoDeEsser::Settings s; s.range = 12.0f; s.threshold = -40.0f; s.pan = pan;
+            l = x; r = x;
+            for (int p = 0; p < n; p += 512) { float* c[2] { l.data() + p, r.data() + p }; a.process (c, 2, std::min (512, n - p), s); }
+            cols.clear(); for (int i = 0; i < a.writeIndex(); ++i) cols.push_back (a.column (i));
+            return a.latency();
+        };
+        std::vector<float> l0, r0, l1, r1; std::vector<Column> c0, c1;
+        const int L = run (0.0f, l0, r0, c0); run (1.0f, l1, r1, c1);
+        bool same = c0.size() == c1.size();
+        for (size_t i = 0; same && i < c0.size(); ++i) same = c0[i].who == c1[i].who && std::abs (c0[i].redDb - c1[i].redDb) < 1.0e-4f;
+        check (same, "détection et réduction identiques avec le PAN tout à droite");
+        auto rmsAt = [&] (const std::vector<float>& v, double t0, double t1)
+        { double e = 0; int k = 0; for (int i = (int) (t0 * fs) + L; i < (int) (t1 * fs) + L; ++i, ++k) e += (double) v[(size_t) i] * v[(size_t) i]; return 10.0 * std::log10 (e / k + 1e-20); };
+        const double leftS = rmsAt (l1, 1.64, 1.72) - rmsAt (l0, 1.64, 1.72), rightS = rmsAt (r1, 1.64, 1.72) - rmsAt (r0, 1.64, 1.72);
+        const double voice = rmsAt (l1, 1.2, 1.5) - rmsAt (l0, 1.2, 1.5);
+        check (leftS < -15.0 && rightS > 2.0 && rightS < 4.0, "sibilance tout à droite : gauche " + juce::String (leftS, 1) + " dB, droite +" + juce::String (rightS, 1) + " dB");
+        check (std::abs (voice) < 0.2, "voix hors sibilance : " + juce::String (voice, 2) + " dB");
+    }
+
     std::cout << "3. MANUEL : le gain à sa place dans le temps du DAW\n";
     {
         ManualEngine m;

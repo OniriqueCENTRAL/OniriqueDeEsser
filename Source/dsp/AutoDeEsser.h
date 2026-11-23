@@ -5,6 +5,7 @@
 #include <array>
 #include "Biquad.h"
 #include "Common.h"
+#include "SibPan.h"
 
 namespace onirique::deess
 {
@@ -72,6 +73,13 @@ public:
         const float share = env / (envFull + 1.0e-6f);
         if (envFull > 0.003f) shareAvg += avgK * (std::min (share, 1.0f) - shareAvg);
 
+        // la détection seule (0 à 1), quel que soit RANGE : sert au PAN des sibilances
+        detect = 0.0f;
+        if (on)
+        {
+            const float floorD = std::max (0.19f, shareAvg + 0.12f);
+            detect = juce::jlimit (0.0f, 1.0f, (levelDb - thrDb + 3.0f) / 6.0f) * juce::jlimit (0.0f, 1.0f, (share - floorD) / 0.15f);
+        }
         float target = 0.0f;
         if (on && rangeDb > 0.01f)
         {
@@ -98,7 +106,7 @@ public:
         }
         return red;
     }
-    float levelDb = -140.0f;
+    float levelDb = -140.0f, detect = 0.0f;
 
 private:
     float coef (double ms) const { return (float) (1.0 - std::exp (-1.0 / (ms * 0.001 * fs))); }
@@ -191,6 +199,9 @@ public:
         for (auto& r : colEAgo) for (auto& e : r) e = 0.0;
         colRing = 0;
         for (auto& d : dryLive) d.reset();
+        sibPan.prepare (fs);
+        sibGate = 0.0f;
+        gateAtk = (float) (1.0 - std::exp (-1.0 / (0.001 * fs))); gateRel = (float) (1.0 - std::exp (-1.0 / (0.040 * fs)));
         for (auto& d : pre) d.reset();
         for (auto& e : shapeEnv) e = 0.0;
         allEnv = 0.0;
@@ -206,7 +217,7 @@ public:
     // LIVE : sans l'écoute du tri, pour enregistrer à travers le plugin (le tri décide sur les premières ms du son)
     int latencyLive() const noexcept { return look * 4; }
 
-    struct Settings { float threshold = -30, range = 10, freq = 5500, clarity = 0; bool on[numTargets] { true, false, false, false, false }; bool listen = false; bool live = false; };
+    struct Settings { float threshold = -30, range = 10, freq = 5500, clarity = 0; bool on[numTargets] { true, false, false, false, false }; bool listen = false; bool live = false; float pan = 0.0f; };
 
     void process (float* const* ch, int numCh, int n, const Settings& s) noexcept
     {
@@ -216,6 +227,7 @@ public:
         bands[tF].setFreq (9000.0f);
         bands[tK].setFreq (4000.0f);
         live = s.live;
+        sibPan.setPan (s.pan);
         clar.setTargetValue (s.clarity * 0.01f);
         listenS.setTargetValue (s.listen ? 1.0f : 0.0f);
         float x[2], red[numTargets];
@@ -256,6 +268,12 @@ public:
                 if (s.on[t]) det = std::max (det, bands[t].levelDb);
                 if (red[t] > worst) { worst = red[t]; who = t; }
             }
+            // PAN : une sibilance (S, CH ou F coché, et reconnu comme tel par le tri) détectée en ce moment
+            {
+                float g = 0.0f;
+                for (int t : { (int) tS, (int) tCH, (int) tF }) g = std::max (g, bands[t].detect * weight[t]);
+                sibGate += (g > sibGate ? gateAtk : gateRel) * (g - sibGate);
+            }
             // CLARITY : une étagère douce dès 3 kHz, qui s'efface pendant qu'un son est baissé (l'éclat revient, pas les S)
             const float c = clar.getNextValue();
             const float duck = 1.0f - juce::jlimit (0.0f, 1.0f, worst / 6.0f);
@@ -267,14 +285,15 @@ public:
                 if (shelfDb != 0.0f) shelf.setCoeffs (BiquadCoeffs::highShelf (fs, std::min (3000.0, 0.45 * fs), 0.6, shelfDb));
             }
             const float lm = listenS.getNextValue();
-            float out = 0.0f;
+            float out = 0.0f, y[2] { 0.0f, 0.0f };
+            for (int cc = 0; cc < numCh; ++cc) y[cc] = shelfDb != 0.0f ? shelf.process (x[cc], cc) : x[cc];
+            sibPan.process (y, numCh, sibGate);   // après tout le traitement : la détection n'en voit rien
             for (int cc = 0; cc < numCh; ++cc)
             {
                 const float dm = dry[cc].process (ch[cc][i]), dlv = dryLive[cc].process (ch[cc][i]);
                 const float d = live ? dlv : dm;
-                float y = shelfDb != 0.0f ? shelf.process (x[cc], cc) : x[cc];
-                if (lm > 0.0f) y += lm * ((d - x[cc]) - y);   // LISTEN : seulement ce qui est retiré
-                ch[cc][i] = y;
+                if (lm > 0.0f) y[cc] += lm * ((d - x[cc]) - y[cc]);   // LISTEN : seulement ce qui est retiré
+                ch[cc][i] = y[cc];
                 out = std::max (out, std::abs (x[cc]));
             }
             // l'historique
@@ -395,6 +414,8 @@ private:
     int cur = 0, ahead = 1440, colRing = 0;
     bool live = false;
     DelayLine dryLive[2];
+    SibPan sibPan;
+    float sibGate = 0.0f, gateAtk = 0.1f, gateRel = 0.001f;
     bool onset = false, judging = false;
     DelayLine pre[2];
     bool armed = true;

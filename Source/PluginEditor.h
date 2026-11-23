@@ -49,7 +49,8 @@ private:
     // AUTO
     ui::Switch tS, tT, tCH, tF, tK, listen;
     dui::LiveCheck live;
-    ui::Knob threshold, range, freq, clarity;
+    ui::Knob threshold, range, freq, clarity, sibPan;
+    dui::PanSlider sibPanManual;
     dui::AutoView autoView;
     float grShown = 0.0f;
     // MANUEL

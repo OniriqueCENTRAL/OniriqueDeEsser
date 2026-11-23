@@ -169,6 +169,71 @@ private:
 };
 
 //==============================================================================
+/** PAN DES SIBILANCES (MANUEL) : une glissière de gauche à droite, le centre marqué ; double-clic : au centre. */
+class PanSlider : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit PanSlider (juce::RangedAudioParameter& p) : param (p), attachment (p, [this] (float v) { value = v; repaint(); })
+    {
+        attachment.sendInitialUpdate();
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        setRepaintsOnMouseActivity (true);
+    }
+    void setScale (float s) { u = s; repaint(); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        const auto c = familyColour (0);
+        ui::text (g, fr ("PAN DES SIBILANCES"), R (r.getX(), r.getY(), r.getWidth(), 14 * u), ui::font (ui::Face::display, 8.5f * u, 0.14f), ui::bone,
+                  juce::Justification::centredLeft);
+        ui::text (g, param.getText (param.getValue(), 8), R (r.getX(), r.getY(), r.getWidth(), 14 * u), ui::font (ui::Face::mono, 10.0f * u),
+                  isMouseOver() || dragging ? ui::bone : ui::haze, juce::Justification::centredRight);
+        const auto tr = track();
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.fillRoundedRectangle (tr, tr.getHeight() * 0.5f);
+        const float cx = tr.getCentreX(), k = value / 100.0f, kx = cx + tr.getWidth() * 0.5f * k;
+        g.setColour (ui::haze.withAlpha (0.6f));
+        g.fillRect (R (1.5f * u, tr.getHeight() + 6 * u).withCentre ({ cx, tr.getCentreY() }));
+        if (std::abs (k) > 0.001f)
+        {
+            g.setColour (c);
+            g.fillRoundedRectangle (R (std::min (cx, kx), tr.getY(), std::abs (kx - cx), tr.getHeight()), tr.getHeight() * 0.5f);
+        }
+        const auto knob = R (14 * u, 14 * u).withCentre ({ kx, tr.getCentreY() });
+        g.setColour (ui::bone);
+        g.fillEllipse (knob);
+        g.setColour (c);
+        g.drawEllipse (knob.reduced (1.0f), 1.5f);
+        ui::text (g, "L", R (tr.getX() - 2 * u, tr.getBottom() + 3 * u, 12 * u, 10 * u), ui::font (ui::Face::mono, 8.0f * u), ui::haze, juce::Justification::centredLeft);
+        ui::text (g, "R", R (tr.getRight() - 10 * u, tr.getBottom() + 3 * u, 12 * u, 10 * u), ui::font (ui::Face::mono, 8.0f * u), ui::haze, juce::Justification::centredRight);
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu()) return;
+        dragging = true;
+        attachment.beginGesture();
+        set (e.position.x);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override { if (dragging) set (e.position.x); }
+    void mouseUp (const juce::MouseEvent&) override { if (dragging) { attachment.endGesture(); dragging = false; repaint(); } }
+    void mouseDoubleClick (const juce::MouseEvent&) override { attachment.setValueAsCompleteGesture (0.0f); }
+
+private:
+    R track() const { const auto r = getLocalBounds().toFloat(); return R (r.getX() + 7 * u, r.getY() + 20 * u, r.getWidth() - 14 * u, 6 * u); }
+    void set (float x)
+    {
+        const auto tr = track();
+        float v = juce::jlimit (-100.0f, 100.0f, ((x - tr.getX()) / tr.getWidth() * 2.0f - 1.0f) * 100.0f);
+        if (std::abs (v) < 3.0f) v = 0.0f;   // le centre accroche
+        attachment.setValueAsPartOfGesture (std::round (v));
+    }
+    juce::RangedAudioParameter& param;
+    juce::ParameterAttachment attachment;
+    float value = 0.0f, u = 1.0f;
+    bool dragging = false;
+};
+
+//==============================================================================
 /** TOUT RÉDUIRE pour une famille : une glissière horizontale dans sa couleur, le nombre d'événements à gauche. */
 class TameSlider : public juce::Component, public juce::SettableTooltipClient
 {

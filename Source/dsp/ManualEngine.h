@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include "Common.h"
+#include "SibPan.h"
 
 namespace onirique::deess
 {
@@ -19,7 +20,10 @@ namespace onirique::deess
     verrouille ni n'alloue jamais ; les anciennes tables sont libérées plus tard, sur le fil des messages.
 
     L'ÉCOUTE : le son d'un événement (avec un peu d'avant et d'après, son gain appliqué) préparé sur le fil des messages
-    dans l'un de deux tampons, puis joué par le fil audio à la place du son qui passe. */
+    dans l'un de deux tampons, puis joué par le fil audio à la place du son qui passe.
+
+    LE PAN DES SIBILANCES : une seconde table, celle des événements de la famille SIBILANCES (même ceux qui ne sont pas
+    baissés) ; pendant chacun d'eux, avec ses fondus, SibPan déplace le haut du son dans la stéréo. */
 
 struct Span { juce::int64 start = 0, end = 0; float gain = 1.0f; int fade = 220; };
 
@@ -59,7 +63,7 @@ public:
 class ManualEngine
 {
 public:
-    ~ManualEngine() { delete table.exchange (nullptr); }
+    ~ManualEngine() { delete table.exchange (nullptr); delete sibTable.exchange (nullptr); }
 
     void prepare (double sampleRate, int latencySamples)
     {
@@ -67,16 +71,24 @@ public:
         for (auto& d : delay) d.prepare (std::max (1, lat));
         for (auto& b : preview) b.assign ((size_t) (fs * 6.0), 0.0f);
         previewLen.store (0); previewPos.store (0);
-        cursor = 0;
+        cursor = sibCursor = 0;
+        sibPan.prepare (fs);
+        gate = 0.0f;
     }
     int latency() const noexcept { return lat; }
 
     // ---- fil des messages
-    void publish (std::vector<Span> spans)
+    void publish (std::vector<Span> spans, std::vector<Span> sibilances = {})
     {
-        std::sort (spans.begin(), spans.end(), [] (const Span& a, const Span& b) { return a.start < b.start; });
+        auto byStart = [] (const Span& a, const Span& b) { return a.start < b.start; };
+        std::sort (spans.begin(), spans.end(), byStart);
+        std::sort (sibilances.begin(), sibilances.end(), byStart);
+        for (auto& s : sibilances) s.gain = 0.0f;   // lue comme 1 - gain : 1 pendant la sibilance, 0 ailleurs
         auto* t = new GainTable { std::move (spans) };
-        if (auto* old = table.exchange (t, std::memory_order_acq_rel)) retired.push_back ({ old, juce::Time::getMillisecondCounter() });
+        auto* st = new GainTable { std::move (sibilances) };
+        const auto now = juce::Time::getMillisecondCounter();
+        if (auto* old = table.exchange (t, std::memory_order_acq_rel)) retired.push_back ({ old, now });
+        if (auto* old = sibTable.exchange (st, std::memory_order_acq_rel)) retired.push_back ({ old, now });
         collect();
     }
     void collect()   // libère les tables que le fil audio ne peut plus lire (plus d'une seconde après leur retrait)
@@ -100,15 +112,22 @@ public:
     bool isPlaying() const { return previewPos.load() < previewLen.load(); }
 
     // ---- fil audio
-    void process (float* const* ch, int numCh, int n, bool rolling, juce::int64 pos) noexcept
+    void process (float* const* ch, int numCh, int n, bool rolling, juce::int64 pos, float pan = 0.0f) noexcept
     {
         const GainTable* t = table.load (std::memory_order_acquire);
+        const GainTable* st = sibTable.load (std::memory_order_acquire);
+        sibPan.setPan (pan);
         for (int i = 0; i < n; ++i)
         {
             const float g = rolling && t != nullptr ? t->at (pos + i - lat, cursor) : 1.0f;
             if (rolling) gNow = g;                      // en lecture : le gain exact de la table (fondus compris)
             else gNow += 0.002f * (1.0f - gNow);        // à l'arrêt : il revient doucement à 1
-            for (int c = 0; c < numCh; ++c) ch[c][i] = delay[c].process (ch[c][i]) * gNow;
+            if (rolling && st != nullptr) gate = 1.0f - st->at (pos + i - lat, sibCursor);
+            else gate += 0.002f * (0.0f - gate);
+            float y[2] { 0.0f, 0.0f };
+            for (int c = 0; c < numCh; ++c) y[c] = delay[c].process (ch[c][i]) * gNow;
+            sibPan.process (y, numCh, gate);
+            for (int c = 0; c < numCh; ++c) ch[c][i] = y[c];
         }
         lastGain.store (gNow, std::memory_order_relaxed);
         // l'écoute d'un événement
@@ -134,7 +153,10 @@ private:
     double fs = 44100.0;
     int lat = 0;
     DelayLine delay[2];
-    std::atomic<GainTable*> table { nullptr };
+    std::atomic<GainTable*> table { nullptr }, sibTable { nullptr };
+    size_t sibCursor = 0;
+    SibPan sibPan;
+    float gate = 0.0f;
     std::vector<std::pair<GainTable*, juce::uint32>> retired;
     size_t cursor = 0;
     float gNow = 1.0f;
