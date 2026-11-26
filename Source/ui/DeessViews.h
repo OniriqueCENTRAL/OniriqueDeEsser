@@ -904,6 +904,7 @@ private:
     {
         const auto& e = proc.events()[(size_t) i];
         juce::PopupMenu m;
+        m.setLookAndFeel (&getLookAndFeel());   // le menu dans la DA du plugin (jamais le style par défaut)
         m.addItem (1, fr ("Écouter"));
         m.addItem (2, fr ("Rendre à TOUT RÉDUIRE"), e.manual || e.muted);
         m.addItem (3, e.muted ? fr ("Ne plus ignorer") : fr ("Ignorer (laisser tel quel)"));
